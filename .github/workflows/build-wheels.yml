@@ -34,17 +34,13 @@ jobs:
       - name: Build wheel
         shell: cmd
         run: |
-          python setup.py --version > python-version.txt
-          setx /P VERSION=< python-version.txt
           python setup.py bdist_wheel
-          dir dist > wheel_name.txt
-          setx /P WHEEL_PATH=< wheel_name.txt
 
       - name: Upload built wheel
         uses: actions/upload-artifact@v1
         with:
           name: Wheel for ${{ matrix.os }} python ${{ matrix.python-version }} ${{ matrix.python-arch }}
-          path: ${{ env.WHEEL_PATH }}
+          path: dist
 
   build-sdist:
     name: Build sdist
