@@ -21,6 +21,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
           python-architecture: ${{ matrix.python-arch }}
 
+      - name: Restore pip cache
+        uses: actions/cache@v1
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-py${{ matrix.python-version }}-${{ matrix.python-arch}}-pip-${{ hashFiles('requirements*.txt') }}-wheels
+
       - name: Install dependencies
         env:
           PIP_EXTRA_INDEX_URL: "http://pypi.naturalcapitalproject.org/simple/"
