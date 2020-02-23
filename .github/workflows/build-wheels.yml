@@ -56,12 +56,12 @@ jobs:
         run: pip install numpy cython setuptools_scm
 
       - name: Build sdist
-        run: python setup.py sdist
+        run: |
+          ::set-env name=VERSION::python setup.py --version
+          python setup.py sdist --formats=zip
 
       - name: Upload built sdist
         uses: actions/upload-artifact@v1
         with:
           name: Source distribution
-          path: dist/*.*
-
-
+          path: dist/pygeoprocessing-${{ env.VERSION }}.zip
