@@ -35,10 +35,10 @@ jobs:
         shell: cmd
         run: |
           python setup.py --version > python-version.txt
-          set /P VERSION=< python-version.txt
+          setx /P VERSION=< python-version.txt
           python setup.py bdist_wheel
           dir dist > wheel_name.txt
-          set /P WHEEL_PATH=< wheel_name.txt
+          setx /P WHEEL_PATH=< wheel_name.txt
 
       - name: Upload built wheel
         uses: actions/upload-artifact@v1
@@ -65,7 +65,7 @@ jobs:
         shell: cmd
         run: |
           python setup.py --version > python-version.txt
-          set /P VERSION=< python-version.txt
+          setx /P VERSION=< python-version.txt
           python setup.py sdist --formats=zip
 
       - name: Upload built sdist
