@@ -36,7 +36,7 @@ jobs:
       - name: Upload built wheel
         uses: actions/upload-artifact@v1
         with:
-          name: Wheel for ${{ matrix.os }} python ${{ matrix.python-version }} ${{ python-arch }}
+          name: Wheel for ${{ matrix.os }} python ${{ matrix.python-version }} ${{ matrix.python-arch }}
           path: dist/*.whl
 
   build-sdist:
