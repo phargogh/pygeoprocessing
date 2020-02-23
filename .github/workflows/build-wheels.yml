@@ -64,17 +64,10 @@ jobs:
       - name: Build sdist
         shell: cmd
         run: |
-          python setup.py --version > python-version.txt
-          setx /P VERSION=< python-version.txt
-          echo ${{ env.VERSION }}
           python setup.py sdist --formats=zip
-
-      - name: Check version string
-        shell: cmd
-        run: echo ${{ env.VERSION }}
 
       - name: Upload built sdist
         uses: actions/upload-artifact@v1
         with:
           name: Source distribution
-          path: dist/pygeoprocessing-${{ env.VERSION }}.zip
+          path: dist
