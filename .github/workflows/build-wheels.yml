@@ -4,6 +4,7 @@ on: [push, pull_request]
 
 jobs:
   build-wheels:
+    name: Build wheel
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -40,6 +41,7 @@ jobs:
           path: dist/*.whl
 
   build-sdist:
+    name: Build sdist
     runs-on: [windows-latest]
     steps:
       - uses: actions/checkout@v1
