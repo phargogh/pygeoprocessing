@@ -1,4 +1,4 @@
-name: Build python wheels from this revision
+name: Python distributions
 
 on: [push, pull_request]
 
