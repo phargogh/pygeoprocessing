@@ -44,10 +44,14 @@ class ReclassificationMissingValuesError(Exception):
             that are not keys in the dictionary
     """
 
-    def __init__(self, msg, missing_values):
+    def __init__(self, missing_values, raster_path, value_map):
         self.msg = msg
+        self.msg = (
+            f'The following {missing_values.size} raster values '
+            f'{missing_values} from "{raster_path}" do not have corresponding '
+            f'entries in the value map: {value_map}.')
         self.missing_values = missing_values
-        super().__init__(msg, missing_values)
+        super().__init__(msg)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -1817,18 +1821,24 @@ def reclassify_raster(
 
     def _map_dataset_to_value_op(original_values):
         """Convert a block of original values to the lookup values."""
+        out_array = numpy.full(original_values.shape, target_nodata)
+        if nodata is None:
+            valid_mask = numpy.full(original_values.shape, True)
+        else:
+            valid_mask = ~numpy.isclose(original_values, nodata)
+
         if values_required:
-            unique = numpy.unique(original_values)
-            has_map = numpy.in1d(unique, keys)
+            unique = numpy.unique(original_values[valid_mask])
+            has_map = numpy.isin(unique, keys)
             if not all(has_map):
                 missing_values = unique[~has_map]
                 raise ReclassificationMissingValuesError(
-                    f'The following {missing_values.size} raster values'
-                    f' {missing_values} from "{base_raster_path_band[0]}"'
-                    ' do not have corresponding entries in the ``value_map``:'
-                    f' {value_map}.', missing_values)
-        index = numpy.digitize(original_values.ravel(), keys, right=True)
-        return values[index].reshape(original_values.shape)
+                    missing_values, base_raster_path_band[0], value_map
+                )
+
+        index = numpy.digitize(original_values[valid_mask], keys, right=True)
+        out_array[valid_mask] = values[index]
+        return out_array
 
     raster_calculator(
         [base_raster_path_band], _map_dataset_to_value_op,
@@ -2030,7 +2040,7 @@ def warp_raster(
         callback_data=[target_raster_path])
 
     if vector_mask_options:
-        # Make sure the raster creation options passed to ``mask_raster`` 
+        # Make sure the raster creation options passed to ``mask_raster``
         # reflect any metadata updates
         updated_raster_driver_creation_tuple = (
             raster_driver_creation_tuple[0], tuple(raster_creation_options))
