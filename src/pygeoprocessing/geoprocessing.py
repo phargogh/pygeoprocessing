@@ -45,13 +45,12 @@ class ReclassificationMissingValuesError(Exception):
     """
 
     def __init__(self, missing_values, raster_path, value_map):
-        self.msg = msg
         self.msg = (
             f'The following {missing_values.size} raster values '
             f'{missing_values} from "{raster_path}" do not have corresponding '
             f'entries in the value map: {value_map}.')
         self.missing_values = missing_values
-        super().__init__(msg)
+        super().__init__(self.msg)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -790,8 +789,8 @@ def align_and_resize_raster_stack(
             raster_driver_creation_tuple=(raster_driver_creation_tuple),
             target_projection_wkt=target_projection_wkt,
             base_projection_wkt=(
-                    None if not base_projection_wkt_list else
-                    base_projection_wkt_list[index]),
+                None if not base_projection_wkt_list else
+                base_projection_wkt_list[index]),
             vector_mask_options=vector_mask_options,
             gdal_warp_options=gdal_warp_options)
         LOGGER.info(
@@ -1203,7 +1202,7 @@ def zonal_statistics(
         'options': [
             'ALL_TOUCHED=FALSE',
             'ATTRIBUTE=%s' % local_aggregate_field_name]
-        }
+    }
 
     # clip base raster to aggregating vector intersection
     raster_info = get_raster_info(base_raster_path_band[0])
