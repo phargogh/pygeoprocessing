@@ -1823,7 +1823,9 @@ def reclassify_raster(
         """Convert a block of original values to the lookup values."""
         out_array = numpy.full(original_values.shape, target_nodata)
         if nodata is None:
-            valid_mask = numpy.full(original_values.shape, True)
+            valid_mask = numpy.full(
+                original_values.shape, True,
+                dtype=_GDAL_TYPE_TO_NUMPY_LOOKUP[target_datatype])
         else:
             valid_mask = ~numpy.isclose(original_values, nodata)
 

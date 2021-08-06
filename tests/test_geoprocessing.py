@@ -199,6 +199,32 @@ class PyGeoprocessing10(unittest.TestCase):
                 (raster_path, 1), empty_value_map, target_path,
                 gdal.GDT_Float32, target_nodata, values_required=False)
 
+    def test_reclassify_raster_int_to_float(self):
+        """PGP.geoprocessing: test reclassify to float types."""
+        pixel_matrix = numpy.array([
+            [2, 2],
+            [3, 3]
+        ], dtype=numpy.int8)
+        target_nodata = -1
+        raster_path = os.path.join(self.workspace_dir, 'raster.tif')
+        target_path = os.path.join(self.workspace_dir, 'target.tif')
+        _array_to_raster(
+            pixel_matrix, target_nodata, raster_path)
+
+        value_map = {
+            2: 3.1,
+            3: 4.567
+        }
+        expected = numpy.array([
+            [3.1, 3.1],
+            [4.567, 4.567]
+        ])
+        pygeoprocessing.reclassify_raster(
+            (raster_path, 1), value_map, target_path,
+            gdal.GDT_Float32, target_nodata, values_required=True)
+        actual = pygeoprocessing.raster_to_numpy_array(target_path)
+        numpy.testing.assert_allclose(actual, expected)
+
     def test_reproject_vector(self):
         """PGP.geoprocessing: test reproject vector."""
         # Create polygon shapefile to reproject
