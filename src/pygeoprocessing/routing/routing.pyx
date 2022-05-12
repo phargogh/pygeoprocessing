@@ -1423,7 +1423,7 @@ def flow_dir_d8(
 
 def flow_accumulation_d8(
         flow_dir_raster_path_band, target_flow_accum_raster_path,
-        weight_raster_path_band=None,
+        weight_raster_path_band=None, percent_export_raster_path_band=None,
         raster_driver_creation_tuple=DEFAULT_GTIFF_CREATION_TUPLE_OPTIONS):
     """D8 flow accumulation.
 
@@ -1449,6 +1449,11 @@ def flow_accumulation_d8(
             weight. If ``None``, 1 is the default flow accumulation weight.
             This raster must be the same dimensions as
             ``flow_dir_mfd_raster_path_band``.
+        percent_export_raster_path_band (tuple): optional path and band number
+            to a raster that will be used to represent the percentage (as a
+            float between 0 and 1) of the flow accumulation that leaves this
+            pixel.  If ``None``, then all flow that has been accumulated from
+            upstream continues to the downstream pixel.
         raster_driver_creation_tuple (tuple): a tuple containing a GDAL driver
             name string as the first element and a GDAL creation options
             tuple/list as the second. Defaults to a GTiff driver tuple
@@ -1483,6 +1488,10 @@ def flow_accumulation_d8(
     # come from a predefined flow accumulation weight raster
     cdef double weight_val
     cdef double weight_nodata = IMPROBABLE_FLOAT_NODATA  # set to something
+    cdef double percent_export_nodata = IMPROBABLE_FLOAT_NODATA  # set to something
+
+    # This value is used to store the current percent_export value
+    cdef double percent_export
 
     # `search_stack` is used to walk upstream to calculate flow accumulation
     # values
@@ -1530,6 +1539,17 @@ def flow_accumulation_d8(
                 weight_raster_path_band[1]-1]
         if raw_weight_nodata is not None:
             weight_nodata = raw_weight_nodata
+
+    cdef _ManagedRaster percent_export_raster = None
+    if percent_export_raster_path_band:
+        percent_export_raster = _ManagedRaster(
+            percent_export_raster_path_band[0],
+            percent_export_raster_path_band[1], 0)
+        raw_percent_export_nodata = pygeoprocessing.get_raster_info(
+            percent_export_raster_path_band[0])['nodata'][
+                percent_export_raster_path_band[1]-1]
+        if raw_percent_export_nodata is not None:
+            percent_export_nodata = raw_percent_export_nodata
 
     flow_dir_raster_info = pygeoprocessing.get_raster_info(
         flow_dir_raster_path_band[0])
@@ -1628,8 +1648,20 @@ def flow_accumulation_d8(
                                     weight_val = 0.0
                             else:
                                 weight_val = 1.0
+
+                            percent_export = 1.0  # Assume we export everything.
+                            if percent_export_raster is not None:
+                                percent_export = <double>percent_export_raster.get(
+                                    xi_n, yi_n)
+                                if _is_close(percent_export, percent_export_nodata, 1e-8, 1e-5):
+                                    LOGGER.warning(
+                                        f"Percent export at index {xi_n},{yi_n} is "
+                                        "undefined, but there is a valid flow "
+                                        "accumulation. Using 0.0 as percent export.")
+                                    percent_export = 0.0
+
                             search_stack.push(
-                                FlowPixelType(xi_n, yi_n, 0, weight_val))
+                                FlowPixelType(xi_n, yi_n, 0, weight_val * percent_export))
                             preempted = 1
                             break
                         flow_pixel.value += upstream_flow_accum
