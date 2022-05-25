@@ -1549,7 +1549,6 @@ def flow_accumulation_d8(
     else:
         flow_dir_nodata = tmp_flow_dir_nodata
 
-    print("Starting iterblocks")
     for offset_dict in pygeoprocessing.iterblocks(
             flow_dir_raster_path_band, offset_only=True, largest_block=0):
         win_xsize = offset_dict['win_xsize']
@@ -1568,7 +1567,6 @@ def flow_accumulation_d8(
         yi_n = -1
 
         # Search block for pixels that do not have any upstream pixels.
-        print("Starting blockwise search")
         for yi in range(0, win_ysize):
             for xi in range(0, win_xsize):
                 flow_dir = <int>flow_dir_managed_raster.get(xi, yi)
@@ -1595,7 +1593,6 @@ def flow_accumulation_d8(
                     search_stack.push(
                         FlowPixelType(xi, yi, 0, 0))
 
-                print("Starting search queue")
                 while not search_stack.empty():
                     flow_pixel = search_stack.top()
                     search_stack.pop()
@@ -1605,10 +1602,8 @@ def flow_accumulation_d8(
                     yi = flow_pixel.yi
                     if (xi < 0 or xi >= raster_x_size or
                             yi < 0 or yi >= raster_y_size):
-                        print("--> Why is this in the stack? ", xi, yi)
                         continue
 
-                    print("Starting position", xi, yi)
                     flow_dir = <int>flow_dir_managed_raster.get(xi, yi)
                     if flow_dir == flow_dir_nodata:
                         continue
@@ -1621,12 +1616,12 @@ def flow_accumulation_d8(
                         on_pixel_load = 1.0
 
                     # Do decayed flow accumulation only if user defined a decay factor.
-                    print("Doing decayed accumulation: ", do_decayed_accumulation)
                     if not do_decayed_accumulation:
                         preexisting_load = <double>flow_accum_managed_raster.get(xi, yi)
                         if _is_close(preexisting_load, flow_accum_nodata, 1e-8, 1e-5):
                             preexisting_load = 0
-                        flow_accum_managed_raster.set(xi, yi, preexisting_load + on_pixel_load)
+                        flow_accum_managed_raster.set(
+                            xi, yi, flow_pixel.value + preexisting_load + on_pixel_load)
                     else:
                         max_decayed_load = on_pixel_load * (0.001 * decay_factor)  # stop when reached
                         local_decay_factor = 1.0
@@ -1656,7 +1651,7 @@ def flow_accumulation_d8(
                     if (xi_n < 0 or xi_n >= raster_x_size or
                             yi_n < 0 or yi_n >= raster_y_size):
                         continue
-                    search_stack.push(FlowPixelType(xi_n, yi_n, 0, 0))
+                    search_stack.push(FlowPixelType(xi_n, yi_n, 0, flow_pixel.value + on_pixel_load))
 
     ## this outer loop searches for a pixel that is locally undrained
     #for offset_dict in pygeoprocessing.iterblocks(
