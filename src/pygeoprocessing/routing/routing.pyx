@@ -1424,6 +1424,7 @@ def flow_dir_d8(
 def flow_accumulation_d8(
         flow_dir_raster_path_band, target_flow_accum_raster_path,
         weight_raster_path_band=None, custom_decay_factor=None,
+        double min_decay_proportion=0.001,
         raster_driver_creation_tuple=DEFAULT_GTIFF_CREATION_TUPLE_OPTIONS):
     """D8 flow accumulation.
 
@@ -1532,11 +1533,22 @@ def flow_accumulation_d8(
             weight_nodata = raw_weight_nodata
 
     cdef short do_decayed_accumulation = False
+    cdef short use_const_decay_factor = False
     cdef float decay_factor = 1.0
-    cdef double max_decayed_load, local_decay_factor
+    cdef double min_allowed_decayed_load, local_decay_factor
+    cdef double on_pixel_load
     if custom_decay_factor is not None:
         do_decayed_accumulation = True
-        decay_factor = custom_decay_factor
+        if isinstance(custom_decay_factor, (int, float)):
+            decay_factor = custom_decay_factor
+            use_const_decay_factor = True
+        else:  # assume a path/band tuple
+            if not _is_raster_path_band_formatted(custom_decay_factor):
+                raise ValueError(
+                    "%s is supposed to be a raster band tuple but it's not." % (
+                        custom_decay_factor))
+            decay_factor_managed_raster = _ManagedRaster(
+                custom_decay_factor[0], custom_decay_factor[1], 0)
 
     flow_dir_raster_info = pygeoprocessing.get_raster_info(
         flow_dir_raster_path_band[0])
@@ -1615,7 +1627,6 @@ def flow_accumulation_d8(
                     else:
                         on_pixel_load = 1.0
 
-                    # Do decayed flow accumulation only if user defined a decay factor.
                     if not do_decayed_accumulation:
                         preexisting_load = <double>flow_accum_managed_raster.get(xi, yi)
                         if _is_close(preexisting_load, flow_accum_nodata, 1e-8, 1e-5):
@@ -1623,9 +1634,9 @@ def flow_accumulation_d8(
                         flow_accum_managed_raster.set(
                             xi, yi, flow_pixel.value + preexisting_load + on_pixel_load)
                     else:
-                        max_decayed_load = on_pixel_load * (0.001 * decay_factor)  # stop when reached
+                        min_allowed_decayed_load = on_pixel_load * min_decay_proportion  # stop when reached
                         local_decay_factor = 1.0
-                        while ((on_pixel_load > max_decayed_load) and
+                        while ((on_pixel_load > min_allowed_decayed_load) and
                                (flow_dir != flow_dir_nodata)):
                             preexisting_load = <double>flow_accum_managed_raster.get(
                                 xi, yi)
@@ -1633,7 +1644,11 @@ def flow_accumulation_d8(
                                 preexisting_load = 0
                             flow_accum_managed_raster.set(
                                 xi, yi, preexisting_load + (on_pixel_load * local_decay_factor))
-                            local_decay_factor *= decay_factor
+                            if use_const_decay_factor:
+                                local_decay_factor *= decay_factor
+                            else:
+                                local_decay_factor *= decay_factor_managed_raster.get(
+                                    xi, yi)
 
                             # The next pixel to visit is the one downstream.
                             xi = xi + D8_XOFFSET[flow_dir]
