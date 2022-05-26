@@ -1762,11 +1762,20 @@ def flow_accumulation_d8(
                                 upstream_flow_dir != D8_REVERSE_DIRECTION[i_n]):
                             # neighbor not upstream: nodata or doesn't flow in.
                             continue
+
+                        if do_decayed_accumulation:
+                            if use_const_decay_factor:
+                                upstream_decay_factor = decay_factor
+                            else:
+                                upstream_decay_factor = (
+                                    decay_factor_managed_raster.get(xi_n, yi_n))
+                                # TODO: how to handle nodata here?  Assume decay factor of 0?
+
                         upstream_flow_accum = <double>(
                             flow_accum_managed_raster.get(xi_n, yi_n))
                         if _is_close(upstream_flow_accum, flow_accum_nodata, 1e-8, 1e-5):
-                            # Process upstream before this one.  Flow
-                            # accumulation pixels are nodata until it and
+                            # Process upstream before this one.
+                            # Flow accumulation pixel is nodata until it and
                             # everything upstream of it has been computed.
                             if weight_raster is not None:
                                 weight_val = <double>weight_raster.get(
@@ -1778,11 +1787,6 @@ def flow_accumulation_d8(
 
                             flow_pixel.last_flow_dir = i_n
                             if do_decayed_accumulation:
-                                if use_const_decay_factor:
-                                    upstream_decay_factor = decay_factor
-                                else:
-                                    upstream_decay_factor = (
-                                        decay_factor_managed_raster.get(xi_n, yi_n))
                                 flow_pixel.decaying_values.push(
                                     DecayingValue(weight_val,
                                                   weight_val * min_decay_proportion))
@@ -1801,19 +1805,13 @@ def flow_accumulation_d8(
                         # from upstream, so we just need to add to it from the
                         # decaying values queue.
                         if do_decayed_accumulation:
-                            if use_const_decay_factor:
-                                local_decay_factor = decay_factor
-                            else:
-                                local_decay_factor = (
-                                    decay_factor_managed_raster.get(flow_pixel.xi, flow_pixel.yi))
                             while not flow_pixel.decaying_values.empty():
                                 decayed_value = flow_pixel.decaying_values.front()
                                 flow_pixel.decaying_values.pop()
-                                decayed_value.decayed_value *= local_decay_factor
+                                decayed_value.decayed_value *= upstream_decay_factor
                                 flow_pixel.value += decayed_value.decayed_value
 
                                 decay_from_upstream.push(decayed_value)
-
 
                         flow_accum_managed_raster.set(
                             flow_pixel.xi, flow_pixel.yi,
