@@ -54,25 +54,25 @@ def rafa_test():
     print("Decayed(const) flow accumulation: ",
           pygeoprocessing.raster_to_numpy_array(flow_accum_path))
 
-    #decay_factor_path = os.path.join(workspace, 'decay_factor.tif')
-    #_array_to_raster(
-    #    numpy.array([[FNODATA, 0.5, 0.5, 0.5, 0.5]], dtype=numpy.float32),
-    #    FNODATA, decay_factor_path)
-    #pygeoprocessing.routing.flow_accumulation_d8(
-    #    (flow_dir_path, 1), flow_accum_path,
-    #    custom_decay_factor=(decay_factor_path, 1))
-    #print("Decayed(raster1) flow accumulation: ",
-    #      pygeoprocessing.raster_to_numpy_array(flow_accum_path))
+    decay_factor_path = os.path.join(workspace, 'decay_factor.tif')
+    _array_to_raster(
+        numpy.array([[FNODATA, 0.5, 0.5, 0.5, 0.5]], dtype=numpy.float32),
+        FNODATA, decay_factor_path)
+    pygeoprocessing.routing.flow_accumulation_d8(
+        (flow_dir_path, 1), flow_accum_path,
+        custom_decay_factor=(decay_factor_path, 1))
+    print("Decayed(raster1) flow accumulation: ",
+          pygeoprocessing.raster_to_numpy_array(flow_accum_path))
 
-    #decay_factor_path = os.path.join(workspace, 'decay_factor2.tif')
-    #_array_to_raster(
-    #    numpy.array([[FNODATA, 0.5, 0.4, 0.3, 0.2]], dtype=numpy.float32),
-    #    FNODATA, decay_factor_path)
-    #pygeoprocessing.routing.flow_accumulation_d8(
-    #    (flow_dir_path, 1), flow_accum_path,
-    #    custom_decay_factor=(decay_factor_path, 1))
-    #print("Decayed(raster2) flow accumulation: ",
-    #      pygeoprocessing.raster_to_numpy_array(flow_accum_path))
+    decay_factor_path = os.path.join(workspace, 'decay_factor2.tif')
+    _array_to_raster(
+        numpy.array([[FNODATA, 0.5, 0.4, 0.3, 0.2]], dtype=numpy.float32),
+        FNODATA, decay_factor_path)
+    pygeoprocessing.routing.flow_accumulation_d8(
+        (flow_dir_path, 1), flow_accum_path,
+        custom_decay_factor=(decay_factor_path, 1))
+    print("Decayed(raster2) flow accumulation: ",
+          pygeoprocessing.raster_to_numpy_array(flow_accum_path))
 
 
 def joining_upstream_flow_test():
