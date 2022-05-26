@@ -1561,6 +1561,8 @@ def flow_accumulation_d8(
     else:
         flow_dir_nodata = tmp_flow_dir_nodata
 
+    cdef int win_yi, win_xi
+    cdef long n_pixels_visited = 0
     for offset_dict in pygeoprocessing.iterblocks(
             flow_dir_raster_path_band, offset_only=True, largest_block=0):
         win_xsize = offset_dict['win_xsize']
@@ -1570,8 +1572,7 @@ def flow_accumulation_d8(
 
         if ctime(NULL) - last_log_time > _LOGGING_PERIOD:
             last_log_time = ctime(NULL)
-            current_pixel = xoff + yoff * raster_x_size
-            LOGGER.info('%.1f%% complete', 100.0 * current_pixel / <float>(
+            LOGGER.info('(flow accum d8): %.1f%% complete', 100.0 * n_pixels_visited/ <float>(
                 raster_x_size * raster_y_size))
 
         # ensure these are set for the complier
@@ -1579,16 +1580,17 @@ def flow_accumulation_d8(
         yi_n = -1
 
         # Search block for pixels that do not have any upstream pixels.
-        for yi in range(0, win_ysize):
-            for xi in range(0, win_xsize):
-                flow_dir = <int>flow_dir_managed_raster.get(xi, yi)
+        for win_yi in range(yoff, yoff+win_ysize):
+            for win_xi in range(xoff, xoff+win_xsize):
+                n_pixels_visited += 1
+                flow_dir = <int>flow_dir_managed_raster.get(win_xi, win_yi)
                 if flow_dir == flow_dir_nodata:
                     continue
 
                 is_upstream_most = True
                 for neighbor_i in range(8):
-                    xi_n = xi+D8_XOFFSET[neighbor_i]
-                    yi_n = yi+D8_YOFFSET[neighbor_i]
+                    xi_n = win_xi+D8_XOFFSET[neighbor_i]
+                    yi_n = win_yi+D8_YOFFSET[neighbor_i]
                     if (xi_n < 0 or xi_n >= raster_x_size or
                             yi_n < 0 or yi_n >= raster_y_size):
                         continue
@@ -1603,7 +1605,7 @@ def flow_accumulation_d8(
 
                 if is_upstream_most:
                     search_stack.push(
-                        FlowPixelType(xi, yi, 0, 0))
+                        FlowPixelType(win_xi, win_yi, 0, 0))
 
                 while not search_stack.empty():
                     flow_pixel = search_stack.top()
