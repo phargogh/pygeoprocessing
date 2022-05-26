@@ -15,6 +15,7 @@ _DEFAULT_EPSG = 3116
 FNODATA = float(numpy.finfo(numpy.float32).min)
 BNODATA = 255
 
+numpy.set_printoptions(precision=4)
 
 def _array_to_raster(
         base_array, target_nodata, target_path,
@@ -46,12 +47,12 @@ def rafa_test():
 
     pygeoprocessing.routing.flow_accumulation_d8(
         (flow_dir_path, 1), flow_accum_path)
-    print("Regular flow accumulation: ",
+    print("Regular flow accumulation:          ",
           pygeoprocessing.raster_to_numpy_array(flow_accum_path))
 
     pygeoprocessing.routing.flow_accumulation_d8(
         (flow_dir_path, 1), flow_accum_path, custom_decay_factor=0.5)
-    print("Decayed(const) flow accumulation: ",
+    print("Decayed(const) flow accumulation:   ",
           pygeoprocessing.raster_to_numpy_array(flow_accum_path))
 
     decay_factor_path = os.path.join(workspace, 'decay_factor.tif')

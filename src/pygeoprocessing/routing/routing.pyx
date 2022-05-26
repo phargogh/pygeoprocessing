@@ -1797,9 +1797,9 @@ def flow_accumulation_d8(
                             flow_pixel.value += upstream_flow_accum
 
                     if not upstream_pixels_remain:
-                        # flow_pixel.value already has the flow accumulation
+                        # flow_pixel.value already has the on-pixel load
                         # from upstream, so we just need to add to it from the
-                        # decaying values list.
+                        # decaying values queue.
                         if do_decayed_accumulation:
                             if use_const_decay_factor:
                                 local_decay_factor = decay_factor
