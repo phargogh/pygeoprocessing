@@ -1561,116 +1561,8 @@ def flow_accumulation_d8(
     else:
         flow_dir_nodata = tmp_flow_dir_nodata
 
-    cdef int win_yi, win_xi
-    cdef long n_pixels_visited = 0
-    for offset_dict in pygeoprocessing.iterblocks(
-            flow_dir_raster_path_band, offset_only=True, largest_block=0):
-        win_xsize = offset_dict['win_xsize']
-        win_ysize = offset_dict['win_ysize']
-        xoff = offset_dict['xoff']
-        yoff = offset_dict['yoff']
-
-        if ctime(NULL) - last_log_time > _LOGGING_PERIOD:
-            last_log_time = ctime(NULL)
-            LOGGER.info('(flow accum d8): %.1f%% complete', 100.0 * n_pixels_visited/ <float>(
-                raster_x_size * raster_y_size))
-
-        # ensure these are set for the complier
-        xi_n = -1
-        yi_n = -1
-
-        # Search block for pixels that do not have any upstream pixels.
-        for win_yi in range(yoff, yoff+win_ysize):
-            for win_xi in range(xoff, xoff+win_xsize):
-                n_pixels_visited += 1
-                flow_dir = <int>flow_dir_managed_raster.get(win_xi, win_yi)
-                if flow_dir == flow_dir_nodata:
-                    continue
-
-                is_upstream_most = True
-                for neighbor_i in range(8):
-                    xi_n = win_xi+D8_XOFFSET[neighbor_i]
-                    yi_n = win_yi+D8_YOFFSET[neighbor_i]
-                    if (xi_n < 0 or xi_n >= raster_x_size or
-                            yi_n < 0 or yi_n >= raster_y_size):
-                        continue
-
-                    flow_dir_n = <int>flow_dir_managed_raster.get(xi_n, yi_n)
-                    if flow_dir_n == flow_dir_nodata:
-                        continue
-
-                    if flow_dir_n == D8_REVERSE_DIRECTION[neighbor_i]:
-                        is_upstream_most = False
-                        break
-
-                if is_upstream_most:
-                    search_stack.push(
-                        FlowPixelType(win_xi, win_yi, 0, 0))
-
-                while not search_stack.empty():
-                    flow_pixel = search_stack.top()
-                    search_stack.pop()
-
-                    # In D8, all water flows into one pixel
-                    xi = flow_pixel.xi
-                    yi = flow_pixel.yi
-                    if (xi < 0 or xi >= raster_x_size or
-                            yi < 0 or yi >= raster_y_size):
-                        continue
-
-                    flow_dir = <int>flow_dir_managed_raster.get(xi, yi)
-                    if flow_dir == flow_dir_nodata:
-                        continue
-
-                    if weight_raster is not None:
-                        on_pixel_load = <double>weight_raster.get(xi, yi)
-                        if _is_close(on_pixel_load, weight_nodata, 1e-8, 1e-5):
-                            on_pixel_load = 0.0
-                    else:
-                        on_pixel_load = 1.0
-
-                    if not do_decayed_accumulation:
-                        preexisting_load = <double>flow_accum_managed_raster.get(xi, yi)
-                        if _is_close(preexisting_load, flow_accum_nodata, 1e-8, 1e-5):
-                            preexisting_load = 0
-                        flow_accum_managed_raster.set(
-                            xi, yi, flow_pixel.value + preexisting_load + on_pixel_load)
-                    else:
-                        min_allowed_decayed_load = on_pixel_load * min_decay_proportion  # stop when reached
-                        local_decay_factor = 1.0
-                        while ((on_pixel_load > min_allowed_decayed_load) and
-                               (flow_dir != flow_dir_nodata)):
-                            preexisting_load = <double>flow_accum_managed_raster.get(
-                                xi, yi)
-                            if _is_close(preexisting_load, flow_accum_nodata, 1e-8, 1e-5):
-                                preexisting_load = 0
-                            flow_accum_managed_raster.set(
-                                xi, yi, preexisting_load + (on_pixel_load * local_decay_factor))
-                            if use_const_decay_factor:
-                                local_decay_factor *= decay_factor
-                            else:
-                                local_decay_factor *= decay_factor_managed_raster.get(
-                                    xi, yi)
-
-                            # The next pixel to visit is the one downstream.
-                            xi = xi + D8_XOFFSET[flow_dir]
-                            yi = yi + D8_YOFFSET[flow_dir]
-                            if (xi < 0 or xi >= raster_x_size or
-                                    yi < 0 or yi >= raster_y_size):
-                                # Break if flowing off the edge of the raster;
-                                # can't flow anywhere else so we're done.
-                                break
-                            flow_dir = <int>flow_dir_managed_raster.get(xi, yi)
-
-                    # Add the next downstream pixel to the search queue.
-                    xi_n = flow_pixel.xi + D8_XOFFSET[flow_dir]
-                    yi_n = flow_pixel.yi + D8_YOFFSET[flow_dir]
-                    if (xi_n < 0 or xi_n >= raster_x_size or
-                            yi_n < 0 or yi_n >= raster_y_size):
-                        continue
-                    search_stack.push(FlowPixelType(xi_n, yi_n, 0, flow_pixel.value + on_pixel_load))
-
-    ## this outer loop searches for a pixel that is locally undrained
+    #cdef int win_yi, win_xi
+    #cdef long n_pixels_visited = 0
     #for offset_dict in pygeoprocessing.iterblocks(
     #        flow_dir_raster_path_band, offset_only=True, largest_block=0):
     #    win_xsize = offset_dict['win_xsize']
@@ -1680,91 +1572,199 @@ def flow_accumulation_d8(
 
     #    if ctime(NULL) - last_log_time > _LOGGING_PERIOD:
     #        last_log_time = ctime(NULL)
-    #        current_pixel = xoff + yoff * raster_x_size
-    #        LOGGER.info('%.1f%% complete', 100.0 * current_pixel / <float>(
+    #        LOGGER.info('(flow accum d8): %.1f%% complete', 100.0 * n_pixels_visited/ <float>(
     #            raster_x_size * raster_y_size))
-
-    #    # make a buffer big enough to capture block and boundaries around it
-    #    flow_dir_buffer_array = numpy.empty(
-    #        (offset_dict['win_ysize']+2, offset_dict['win_xsize']+2),
-    #        dtype=numpy.uint8)
-    #    flow_dir_buffer_array[:] = flow_dir_nodata
-
-    #    # attempt to expand read block by a pixel boundary
-    #    (xa, xb, ya, yb), modified_offset_dict = _generate_read_bounds(
-    #        offset_dict, raster_x_size, raster_y_size)
-    #    flow_dir_buffer_array[ya:yb, xa:xb] = flow_dir_band.ReadAsArray(
-    #            **modified_offset_dict).astype(numpy.uint8)
 
     #    # ensure these are set for the complier
     #    xi_n = -1
     #    yi_n = -1
 
-    #    # search block for to set flow direction
-    #    for yi in range(1, win_ysize+1):
-    #        for xi in range(1, win_xsize+1):
-    #            flow_dir = flow_dir_buffer_array[yi, xi]
+    #    # Search block for pixels that do not have any upstream pixels.
+    #    for win_yi in range(yoff, yoff+win_ysize):
+    #        for win_xi in range(xoff, xoff+win_xsize):
+    #            n_pixels_visited += 1
+    #            flow_dir = <int>flow_dir_managed_raster.get(win_xi, win_yi)
     #            if flow_dir == flow_dir_nodata:
     #                continue
 
-    #           xi_n = xi+D8_XOFFSET[flow_dir]
-    #            yi_n = yi+D8_YOFFSET[flow_dir]
+    #            is_upstream_most = True
+    #            for neighbor_i in range(8):
+    #                xi_n = win_xi+D8_XOFFSET[neighbor_i]
+    #                yi_n = win_yi+D8_YOFFSET[neighbor_i]
+    #                if (xi_n < 0 or xi_n >= raster_x_size or
+    #                        yi_n < 0 or yi_n >= raster_y_size):
+    #                    continue
 
-    #            if flow_dir_buffer_array[yi_n, xi_n] == flow_dir_nodata:
-    #                xi_root = xi-1+xoff
-    #                yi_root = yi-1+yoff
+    #                flow_dir_n = <int>flow_dir_managed_raster.get(xi_n, yi_n)
+    #                if flow_dir_n == flow_dir_nodata:
+    #                    continue
 
-    #                if weight_raster is not None:
-    #                    weight_val = <double>weight_raster.get(
-    #                        xi_root, yi_root)
-    #                    if _is_close(weight_val, weight_nodata, 1e-8, 1e-5):
-    #                        weight_val = 0.0
-    #                else:
-    #                    weight_val = 1.0
+    #                if flow_dir_n == D8_REVERSE_DIRECTION[neighbor_i]:
+    #                    is_upstream_most = False
+    #                    break
+
+    #            if is_upstream_most:
     #                search_stack.push(
-    #                    FlowPixelType(xi_root, yi_root, 0, weight_val))
+    #                    FlowPixelType(win_xi, win_yi, 0, 0))
 
     #            while not search_stack.empty():
     #                flow_pixel = search_stack.top()
     #                search_stack.pop()
 
-    #                preempted = 0
-    #                for i_n in range(flow_pixel.last_flow_dir, 8):
-    #                    xi_n = flow_pixel.xi+D8_XOFFSET[i_n]
-    #                    yi_n = flow_pixel.yi+D8_YOFFSET[i_n]
-    #                    if (xi_n < 0 or xi_n >= raster_x_size or
-    #                            yi_n < 0 or yi_n >= raster_y_size):
-    #                        # no upstream here
-    #                        continue
-    #                    upstream_flow_dir = <int>flow_dir_managed_raster.get(
-    #                        xi_n, yi_n)
-    #                    if upstream_flow_dir == flow_dir_nodata or (
-    #                            upstream_flow_dir !=
-    #                            D8_REVERSE_DIRECTION[i_n]):
-    #                        # no upstream here
-    #                        continue
-    #                    upstream_flow_accum = <double>(
-    #                        flow_accum_managed_raster.get(xi_n, yi_n))
-    #                    if _is_close(upstream_flow_accum, flow_accum_nodata, 1e-8, 1e-5):
-    #                        # process upstream before this one
-    #                        flow_pixel.last_flow_dir = i_n
-    #                        search_stack.push(flow_pixel)
-    #                        if weight_raster is not None:
-    #                            weight_val = <double>weight_raster.get(
-    #                                xi_n, yi_n)
-    #                            if _is_close(weight_val, weight_nodata, 1e-8, 1e-5):
-    #                                weight_val = 0.0
-    #                        else:
-    #                            weight_val = 1.0
-    #                        search_stack.push(
-    #                            FlowPixelType(xi_n, yi_n, 0, weight_val))
-    #                        preempted = 1
-    #                        break
-    #                    flow_pixel.value += upstream_flow_accum
-    #                if not preempted:
+    #                # In D8, all water flows into one pixel
+    #                xi = flow_pixel.xi
+    #                yi = flow_pixel.yi
+    #                if (xi < 0 or xi >= raster_x_size or
+    #                        yi < 0 or yi >= raster_y_size):
+    #                    continue
+
+    #                flow_dir = <int>flow_dir_managed_raster.get(xi, yi)
+    #                if flow_dir == flow_dir_nodata:
+    #                    continue
+
+    #                if weight_raster is not None:
+    #                    on_pixel_load = <double>weight_raster.get(xi, yi)
+    #                    if _is_close(on_pixel_load, weight_nodata, 1e-8, 1e-5):
+    #                        on_pixel_load = 0.0
+    #                else:
+    #                    on_pixel_load = 1.0
+
+    #                if not do_decayed_accumulation:
+    #                    preexisting_load = <double>flow_accum_managed_raster.get(xi, yi)
+    #                    if _is_close(preexisting_load, flow_accum_nodata, 1e-8, 1e-5):
+    #                        preexisting_load = 0
     #                    flow_accum_managed_raster.set(
-    #                        flow_pixel.xi, flow_pixel.yi,
-    #                        flow_pixel.value)
+    #                        xi, yi, flow_pixel.value + preexisting_load + on_pixel_load)
+    #                else:
+    #                    min_allowed_decayed_load = on_pixel_load * min_decay_proportion  # stop when reached
+    #                    local_decay_factor = 1.0
+    #                    while ((on_pixel_load > min_allowed_decayed_load) and
+    #                           (flow_dir != flow_dir_nodata)):
+    #                        preexisting_load = <double>flow_accum_managed_raster.get(
+    #                            xi, yi)
+    #                        if _is_close(preexisting_load, flow_accum_nodata, 1e-8, 1e-5):
+    #                            preexisting_load = 0
+    #                        flow_accum_managed_raster.set(
+    #                            xi, yi, preexisting_load + (on_pixel_load * local_decay_factor))
+    #                        if use_const_decay_factor:
+    #                            local_decay_factor *= decay_factor
+    #                        else:
+    #                            local_decay_factor *= decay_factor_managed_raster.get(
+    #                                xi, yi)
+
+    #                        # The next pixel to visit is the one downstream.
+    #                        xi = xi + D8_XOFFSET[flow_dir]
+    #                        yi = yi + D8_YOFFSET[flow_dir]
+    #                        if (xi < 0 or xi >= raster_x_size or
+    #                                yi < 0 or yi >= raster_y_size):
+    #                            # Break if flowing off the edge of the raster;
+    #                            # can't flow anywhere else so we're done.
+    #                            break
+    #                        flow_dir = <int>flow_dir_managed_raster.get(xi, yi)
+
+    #                # Add the next downstream pixel to the search queue.
+    #                xi_n = flow_pixel.xi + D8_XOFFSET[flow_dir]
+    #                yi_n = flow_pixel.yi + D8_YOFFSET[flow_dir]
+    #                if (xi_n < 0 or xi_n >= raster_x_size or
+    #                        yi_n < 0 or yi_n >= raster_y_size):
+    #                    continue
+    #                search_stack.push(FlowPixelType(xi_n, yi_n, 0, flow_pixel.value + on_pixel_load))
+
+    # this outer loop searches for a pixel that is locally undrained
+    for offset_dict in pygeoprocessing.iterblocks(
+            flow_dir_raster_path_band, offset_only=True, largest_block=0):
+        win_xsize = offset_dict['win_xsize']
+        win_ysize = offset_dict['win_ysize']
+        xoff = offset_dict['xoff']
+        yoff = offset_dict['yoff']
+
+        if ctime(NULL) - last_log_time > _LOGGING_PERIOD:
+            last_log_time = ctime(NULL)
+            current_pixel = xoff + yoff * raster_x_size
+            LOGGER.info('(flow accum d8):%.1f%% complete', 100.0 * current_pixel / <float>(
+                raster_x_size * raster_y_size))
+
+        # make a buffer big enough to capture block and boundaries around it
+        flow_dir_buffer_array = numpy.empty(
+            (offset_dict['win_ysize']+2, offset_dict['win_xsize']+2),
+            dtype=numpy.uint8)
+        flow_dir_buffer_array[:] = flow_dir_nodata
+
+        # attempt to expand read block by a pixel boundary
+        (xa, xb, ya, yb), modified_offset_dict = _generate_read_bounds(
+            offset_dict, raster_x_size, raster_y_size)
+        flow_dir_buffer_array[ya:yb, xa:xb] = flow_dir_band.ReadAsArray(
+                **modified_offset_dict).astype(numpy.uint8)
+
+        # ensure these are set for the complier
+        xi_n = -1
+        yi_n = -1
+
+        # search block for to set flow direction
+        for yi in range(1, win_ysize+1):
+            for xi in range(1, win_xsize+1):
+                flow_dir = flow_dir_buffer_array[yi, xi]
+                if flow_dir == flow_dir_nodata:
+                    continue
+
+                xi_n = xi+D8_XOFFSET[flow_dir]
+                yi_n = yi+D8_YOFFSET[flow_dir]
+
+                if flow_dir_buffer_array[yi_n, xi_n] == flow_dir_nodata:
+                    xi_root = xi-1+xoff
+                    yi_root = yi-1+yoff
+
+                    if weight_raster is not None:
+                        weight_val = <double>weight_raster.get(
+                            xi_root, yi_root)
+                        if _is_close(weight_val, weight_nodata, 1e-8, 1e-5):
+                            weight_val = 0.0
+                    else:
+                        weight_val = 1.0
+                    search_stack.push(
+                        FlowPixelType(xi_root, yi_root, 0, weight_val))
+
+                while not search_stack.empty():
+                    flow_pixel = search_stack.top()
+                    search_stack.pop()
+
+                    preempted = 0
+                    for i_n in range(flow_pixel.last_flow_dir, 8):
+                        xi_n = flow_pixel.xi+D8_XOFFSET[i_n]
+                        yi_n = flow_pixel.yi+D8_YOFFSET[i_n]
+                        if (xi_n < 0 or xi_n >= raster_x_size or
+                                yi_n < 0 or yi_n >= raster_y_size):
+                            # no upstream here
+                            continue
+                        upstream_flow_dir = <int>flow_dir_managed_raster.get(
+                            xi_n, yi_n)
+                        if upstream_flow_dir == flow_dir_nodata or (
+                                upstream_flow_dir !=
+                                D8_REVERSE_DIRECTION[i_n]):
+                            # no upstream here
+                            continue
+                        upstream_flow_accum = <double>(
+                            flow_accum_managed_raster.get(xi_n, yi_n))
+                        if _is_close(upstream_flow_accum, flow_accum_nodata, 1e-8, 1e-5):
+                            # process upstream before this one
+                            flow_pixel.last_flow_dir = i_n
+                            search_stack.push(flow_pixel)
+                            if weight_raster is not None:
+                                weight_val = <double>weight_raster.get(
+                                    xi_n, yi_n)
+                                if _is_close(weight_val, weight_nodata, 1e-8, 1e-5):
+                                    weight_val = 0.0
+                            else:
+                                weight_val = 1.0
+                            search_stack.push(
+                                FlowPixelType(xi_n, yi_n, 0, weight_val))
+                            preempted = 1
+                            break
+                        flow_pixel.value += upstream_flow_accum
+                    if not preempted:
+                        flow_accum_managed_raster.set(
+                            flow_pixel.xi, flow_pixel.yi,
+                            flow_pixel.value)
     flow_accum_managed_raster.close()
     flow_dir_managed_raster.close()
     if weight_raster is not None:
