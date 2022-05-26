@@ -125,6 +125,17 @@ cdef struct FlowPixelType:
     int last_flow_dir
     double value
 
+cdef struct DecayingValue:
+    double decayed_value
+    double min_value
+
+cdef struct WeightedFlowPixelType:
+    int xi
+    int yi
+    int last_flow_dir
+    double value
+    queue[DecayingValue] decaying_values
+
 # this struct is used in distance_to_channel_mfd to add up each pixel's
 # weighted distances and flow weights
 cdef struct MFDFlowPixelType:
@@ -1487,8 +1498,8 @@ def flow_accumulation_d8(
 
     # `search_stack` is used to walk upstream to calculate flow accumulation
     # values
-    cdef stack[FlowPixelType] search_stack
-    cdef FlowPixelType flow_pixel
+    cdef stack[WeightedFlowPixelType] search_stack
+    cdef WeightedFlowPixelType flow_pixel, new_flow_pixel
 
     # properties of the parallel rasters
     cdef int raster_x_size, raster_y_size
@@ -1671,6 +1682,7 @@ def flow_accumulation_d8(
     #                search_stack.push(FlowPixelType(xi_n, yi_n, 0, flow_pixel.value + on_pixel_load))
 
     # this outer loop searches for a pixel that is locally undrained
+    cdef queue[double] decaying_values
     for offset_dict in pygeoprocessing.iterblocks(
             flow_dir_raster_path_band, offset_only=True, largest_block=0):
         win_xsize = offset_dict['win_xsize']
@@ -1722,7 +1734,8 @@ def flow_accumulation_d8(
                     else:
                         weight_val = 1.0
                     search_stack.push(
-                        FlowPixelType(xi_root, yi_root, 0, weight_val))
+                        WeightedFlowPixelType(xi_root, yi_root, 0, weight_val,
+                                              queue[DecayingValue]()))
 
                 while not search_stack.empty():
                     flow_pixel = search_stack.top()
@@ -1734,19 +1747,21 @@ def flow_accumulation_d8(
                         yi_n = flow_pixel.yi+D8_YOFFSET[i_n]
                         if (xi_n < 0 or xi_n >= raster_x_size or
                                 yi_n < 0 or yi_n >= raster_y_size):
-                            # no upstream here
+                            # no upstream here: off edges of the raster.
                             continue
                         upstream_flow_dir = <int>flow_dir_managed_raster.get(
                             xi_n, yi_n)
                         if upstream_flow_dir == flow_dir_nodata or (
                                 upstream_flow_dir !=
                                 D8_REVERSE_DIRECTION[i_n]):
-                            # no upstream here
+                            # no upstream here: nodata or doesn't flow in
                             continue
                         upstream_flow_accum = <double>(
                             flow_accum_managed_raster.get(xi_n, yi_n))
                         if _is_close(upstream_flow_accum, flow_accum_nodata, 1e-8, 1e-5):
-                            # process upstream before this one
+                            # Process upstream before this one.  Flow
+                            # accumulation raster is nodata until it has a
+                            # valid value.
                             flow_pixel.last_flow_dir = i_n
                             search_stack.push(flow_pixel)
                             if weight_raster is not None:
@@ -1757,10 +1772,33 @@ def flow_accumulation_d8(
                             else:
                                 weight_val = 1.0
                             search_stack.push(
-                                FlowPixelType(xi_n, yi_n, 0, weight_val))
+                                WeightedFlowPixelType(xi_n, yi_n, 0, weight_val,
+                                                      queue[DecayingValue]()))
                             preempted = 1
                             break
-                        flow_pixel.value += upstream_flow_accum
+
+                        # How to create new queue within loop?
+                        # We don't.  Just use the one in the decaying_values queue.
+                        if do_decayed_accumulation:
+                            new_flow_pixel = WeightedFlowPixelType(
+                                flow_pixel.xi, flow_pixel.yi, flow_pixel.last_flow_dir,
+                                flow_pixel.value, queue[DecayingValue]())
+                            if use_const_decay_factor:
+                                upstream_decay_factor = decay_factor
+                            else:
+                                upstream_decay_factor = (
+                                    decay_factor_managed_raster.get(xi_n, yi_n))
+
+                            decayed_values_sum = 0.0
+                            while not flow_pixel.decaying_values.empty():
+                                decaying_value = flow_pixel.decaying_values.front().decayed_value
+                                min_value = flow_pixel.decaying_values.front().min_value
+                                flow_pixel.decaying_values.pop()
+                                decaying_value *= upstream_decay_factor
+                                decayed_values_sum += decaying_value
+                                decaying_values.push(decaying_value)
+
+                        flow_pixel.value += upstream_flow_accum + decayed_values_sum
                     if not preempted:
                         flow_accum_managed_raster.set(
                             flow_pixel.xi, flow_pixel.yi,
