@@ -1574,6 +1574,7 @@ def flow_accumulation_d8(
 
     # this outer loop searches for a pixel that is locally undrained
     cdef queue[DecayingValue] decay_from_upstream
+    cdef double upstream_transport_factor = 1.0  # proportion of load transported to downstream pixel
     for offset_dict in pygeoprocessing.iterblocks(
             flow_dir_raster_path_band, offset_only=True, largest_block=0):
         win_xsize = offset_dict['win_xsize']
@@ -1661,9 +1662,9 @@ def flow_accumulation_d8(
 
                         if do_decayed_accumulation:
                             if use_const_decay_factor:
-                                upstream_decay_factor = decay_factor
+                                upstream_transport_factor = decay_factor
                             else:
-                                upstream_decay_factor = (
+                                upstream_transport_factor = (
                                     decay_factor_managed_raster.get(xi_n, yi_n))
                                 # TODO: how to handle nodata here?  Assume decay factor of 0?
 
@@ -1704,7 +1705,7 @@ def flow_accumulation_d8(
                             while not flow_pixel.decaying_values.empty():
                                 decayed_value = flow_pixel.decaying_values.front()
                                 flow_pixel.decaying_values.pop()
-                                decayed_value.decayed_value *= upstream_decay_factor
+                                decayed_value.decayed_value *= upstream_transport_factor
                                 flow_pixel.value += decayed_value.decayed_value
 
                                 decay_from_upstream.push(decayed_value)
