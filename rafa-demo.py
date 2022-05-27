@@ -2,6 +2,7 @@ import logging
 import os
 import time
 
+import line_profiler
 import numpy
 import pygeoprocessing
 import pygeoprocessing.routing
@@ -14,6 +15,12 @@ _DEFAULT_PIXEL_SIZE = (30, -30)
 _DEFAULT_EPSG = 3116
 FNODATA = float(numpy.finfo(numpy.float32).min)
 BNODATA = 255
+ASTORIA_DEM = (
+    "/Users/jdouglass/Downloads/2022-05-16-astoria-ndr-troubleshooting/"
+    "workspace/intermediate_outputs/cache_dir/filled_dem_regular.tif")
+GURA_DEM = (
+    "/Users/jdouglass/workspace/natcap/invest/data/invest-sample-data/"
+    "RouteDEM/DEM_gura.tif")
 
 numpy.set_printoptions(precision=4)
 
@@ -95,16 +102,16 @@ def joining_upstream_flow_test():
           pygeoprocessing.raster_to_numpy_array(flow_accum_path))
 
 
-def astoria_test():
-    n = 5
+def dem_test(filled_dem_path, name, n=5):
+    workspace = f'weighted_flow_dir_{name}'
+    if not os.path.exists(workspace):
+        os.mkdir(workspace)
     total_time = 0
-    filled_dem_path = (
-        "/Users/jdouglass/Downloads/2022-05-16-astoria-ndr-troubleshooting/"
-        "workspace/intermediate_outputs/cache_dir/filled_dem_regular.tif")
-    flow_dir_path = 'd8_flow_dir_path'
-    target_flow_accum_path = 'd8_flow_accum_astoria.tif'
+    flow_dir_path = os.path.join(workspace, 'd8_flow_dir_path.tif')
     pygeoprocessing.routing.flow_dir_d8(
         (filled_dem_path, 1), flow_dir_path)
+    target_flow_accum_path = os.path.join(
+        workspace, 'd8_flow_accum_nodecay.tif')
     for _ in range(n):
         if os.path.exists(target_flow_accum_path):
             os.remove(target_flow_accum_path)
@@ -115,11 +122,32 @@ def astoria_test():
         end_time = time.time()
         total_time += (end_time - start_time)
 
-    print(f"Mean time per run: {total_time/n}s")
+    print(f"Mean time per run (no decay): {total_time/n}s")
+
+    target_flow_accum_path = os.path.join(
+        workspace, 'd8_flow_accum_decay.tif')
+    for _ in range(n):
+        if os.path.exists(target_flow_accum_path):
+            os.remove(target_flow_accum_path)
+
+        start_time = time.time()
+        profile = line_profiler.LineProfiler(
+            pygeoprocessing.routing.flow_accumulation_d8)
+        profile.runcall(
+            pygeoprocessing.routing.flow_accumulation_d8,
+            (flow_dir_path, 1), target_flow_accum_path,
+            custom_decay_factor=0.5)
+        profile.print_stats()
+        end_time = time.time()
+        total_time += (end_time - start_time)
+
+    print(f"Mean time per run (w/ decay): {total_time/n}s")
+
 
 
 if __name__ == '__main__':
     rafa_test()
     joining_upstream_flow_test()
-    #astoria_test()
+    #dem_test(ASTORIA_DEM, 'astoria', 5)
+    dem_test(GURA_DEM, 'gura', 1)
     #nonmatching()
