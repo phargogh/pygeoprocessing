@@ -149,5 +149,5 @@ if __name__ == '__main__':
     rafa_test()
     joining_upstream_flow_test()
     #dem_test(ASTORIA_DEM, 'astoria', 5)
-    dem_test(GURA_DEM, 'gura', 1)
+    dem_test(GURA_DEM, 'gura', 5)
     #nonmatching()
