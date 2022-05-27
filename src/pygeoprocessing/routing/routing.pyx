@@ -1628,6 +1628,11 @@ def flow_accumulation_d8(
                         WeightedFlowPixelType(xi_root, yi_root, 0, weight_val,
                                               queue[DecayingValue]()))
 
+                # Drain the queue of upstream neighbors since we're starting
+                # from a new root pixel.
+                while not decay_from_upstream.empty():
+                    decay_from_upstream.pop()
+
                 while not search_stack.empty():
                     flow_pixel = search_stack.top()
                     search_stack.pop()
