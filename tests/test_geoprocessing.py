@@ -1,20 +1,22 @@
 """pygeoprocessing.geoprocessing test suite."""
+import contextlib
 import itertools
-import queue
-import os
+import logging
 import logging.handlers
+import os
 import pathlib
+import queue
 import shutil
+import sys
 import tempfile
 import time
 import types
 import unittest
 import unittest.mock
 import warnings
-import logging
-import contextlib
 
 import numpy
+import packaging.version
 import pygeoprocessing
 import pygeoprocessing.multiprocessing
 import pygeoprocessing.symbolic
@@ -33,6 +35,15 @@ from pygeoprocessing.geoprocessing_core import \
 _DEFAULT_ORIGIN = (444720, 3751320)
 _DEFAULT_PIXEL_SIZE = (30, -30)
 _DEFAULT_EPSG = 3116
+
+# Numpy changed their division-by-zero warning message in numpy 1.23.0
+if (packaging.version.parse(numpy.__version__) <
+        packaging.version.parse('1.23.0')):
+    NUMPY_DIV_BY_ZERO_MSG = 'divide by zero encountered in true_divide'
+    NUMPY_DIV_INVALID_VAL_MSG = 'invalid value encountered in true_divide'
+else:
+    NUMPY_DIV_BY_ZERO_MSG = 'divide by zero encountered in divide'
+    NUMPY_DIV_INVALID_VAL_MSG = 'invalid value encountered in divide'
 
 
 def passthrough(x):
@@ -436,20 +447,50 @@ class TestGeoprocessing(unittest.TestCase):
         # create the file first so the model needs to deal with that
         target_file = open(target_vector_path, 'w')
         target_file.close()
-        pygeoprocessing.reproject_vector(
-            base_vector_path, target_reference.ExportToWkt(),
-            target_vector_path, layer_id=0)
 
-        vector = ogr.Open(target_vector_path)
-        layer = vector.GetLayer()
-        result_reference = layer.GetSpatialRef()
+        pygeoprocessing_logger = logging.getLogger('pygeoprocessing')
+        layer_name = 'my_fun_layer'
+        with capture_logging(pygeoprocessing_logger) as captured_logging:
+            pygeoprocessing.reproject_vector(
+                base_vector_path, target_reference.ExportToWkt(),
+                target_vector_path, layer_id=0, target_layer_name=layer_name)
+        self.assertEqual(len(captured_logging), 2)
+        self.assertIn(f'already exists, removing and overwriting',
+                      captured_logging[0].msg)
+        self.assertIn(f'Ignoring user-defined layer name {layer_name}',
+                      captured_logging[1].msg)
+        try:
+            vector = ogr.Open(target_vector_path)
+            layer = vector.GetLayer()
+            result_reference = layer.GetSpatialRef()
+            self.assertTrue(
+                osr.SpatialReference(result_reference.ExportToWkt()).IsSame(
+                    osr.SpatialReference(target_reference.ExportToWkt())))
+            self.assertEqual(layer.GetLayerDefn().GetName(), 'target_vector')
+        finally:
+            layer = None
+            vector = None
 
-        layer = None
-        vector = None
+        with capture_logging(pygeoprocessing_logger) as captured_logging:
+            target_vector_path = os.path.join(self.workspace_dir, 'test.gpkg')
+            pygeoprocessing.reproject_vector(
+                base_vector_path, target_reference.ExportToWkt(),
+                target_vector_path, layer_id=0, driver_name='GPKG',
+                target_layer_name=layer_name)
+        self.assertEqual(len(captured_logging), 0)
 
-        self.assertTrue(
-            osr.SpatialReference(result_reference.ExportToWkt()).IsSame(
-                osr.SpatialReference(target_reference.ExportToWkt())))
+        try:
+            vector = ogr.Open(target_vector_path)
+            layer = vector.GetLayer()
+            result_reference = layer.GetSpatialRef()
+            self.assertTrue(
+                osr.SpatialReference(result_reference.ExportToWkt()).IsSame(
+                    osr.SpatialReference(target_reference.ExportToWkt())))
+            self.assertEqual(layer.GetLayerDefn().GetName(), layer_name)
+        finally:
+            layer = None
+            vector = None
+
 
     def test_reproject_vector_partial_fields(self):
         """PGP.geoprocessing: reproject vector with partial field copy."""
@@ -764,7 +805,6 @@ class TestGeoprocessing(unittest.TestCase):
 
         # make an n x n raster with 2*m x 2*m polygons inside.
         pixel_size = 1.0
-        subpixel_size = 1./5. * pixel_size
         origin_x = 1.0
         origin_y = -1.0
         n = 1
@@ -772,14 +812,14 @@ class TestGeoprocessing(unittest.TestCase):
         for row_index in range(n * 2):
             for col_index in range(n * 2):
                 x_pos = origin_x + (
-                    col_index*2 + 1 + col_index // 2) * subpixel_size
+                    col_index*2 + 1 + col_index // 2) * pixel_size
                 y_pos = origin_y - (
-                    row_index*2 + 1 + row_index // 2) * subpixel_size
+                    row_index*2 + 1 + row_index // 2) * pixel_size
                 shapely_feature = shapely.geometry.Polygon([
                     (x_pos, y_pos),
-                    (x_pos+subpixel_size, y_pos),
-                    (x_pos+subpixel_size, y_pos-subpixel_size),
-                    (x_pos, y_pos-subpixel_size),
+                    (x_pos+pixel_size, y_pos),
+                    (x_pos+pixel_size, y_pos-pixel_size),
+                    (x_pos, y_pos-pixel_size),
                     (x_pos, y_pos)])
                 new_feature = ogr.Feature(layer_defn)
                 new_geometry = ogr.CreateGeometryFromWkb(shapely_feature.wkb)
@@ -787,6 +827,14 @@ class TestGeoprocessing(unittest.TestCase):
                 expected_value = row_index // 2 * n + col_index // 2
                 new_feature.SetField('expected_value', expected_value)
                 layer.CreateFeature(new_feature)
+
+        # Create a feature right in the middle of the 4 geometries above
+        new_feature = ogr.Feature(layer_defn)
+        new_geometry = ogr.CreateGeometryFromWkb(
+            shapely.geometry.box(3, -4, 4, -3).wkb)
+        new_feature.SetField('expected_value', 10)
+        new_feature.SetGeometry(new_geometry)
+        layer.CreateFeature(new_feature)
 
         # Now create one additional feature that has no geometry in order to
         # exercise the warning around the feature not having a geometry defined
@@ -805,8 +853,8 @@ class TestGeoprocessing(unittest.TestCase):
         layer.CommitTransaction()
         layer.SyncToDisk()
 
-
         pygeoprocessing_logger = logging.getLogger('pygeoprocessing')
+        # None of the polygons overlap the given bounding box
         with capture_logging(pygeoprocessing_logger) as captured_logging:
             result = pygeoprocessing.calculate_disjoint_polygon_set(
                 vector_path, bounding_box=[-10, -10, -9, -9])
@@ -817,9 +865,19 @@ class TestGeoprocessing(unittest.TestCase):
         self.assertEqual('no polygons intersected the bounding box',
                          captured_logging[2].msg)
 
-        # otherwise none overlap
+        # 4 polygons touch the center polygon, so 2 groups returned
         with capture_logging(pygeoprocessing_logger) as captured_logging:
             result = pygeoprocessing.calculate_disjoint_polygon_set(vector_path)
+        self.assertEqual(len(result), 2, result)
+        self.assertEqual(len(captured_logging), 2)
+        self.assertIn('no geometry in', captured_logging[0].msg)
+        self.assertIn('empty geometry in', captured_logging[1].msg)
+
+        # When polygons are allowed to touch, we end up with 1 group.  The 4
+        # outer polygons touch the central polygon at the corner vertices.
+        with capture_logging(pygeoprocessing_logger) as captured_logging:
+            result = pygeoprocessing.calculate_disjoint_polygon_set(
+                vector_path, geometries_may_touch=True)
         self.assertEqual(len(result), 1, result)
         self.assertEqual(len(captured_logging), 2)
         self.assertIn('no geometry in', captured_logging[0].msg)
@@ -1145,6 +1203,81 @@ class TestGeoprocessing(unittest.TestCase):
                 'sum': 0.0}}
         self.assertEqual(result, expected_result)
 
+    def test_zonal_statistics_value_counts(self):
+        """PGP.geoprocessing: test zonal stats function (value counts)."""
+        # create aggregating polygon
+        pixel_size = 30.0
+        n_pixels = 9
+        origin = (444720, 3751320)
+        polygon_a = shapely.geometry.Polygon([
+            (origin[0], origin[1]),
+            (origin[0], -pixel_size * n_pixels+origin[1]),
+            (origin[0]+pixel_size * n_pixels,
+             -pixel_size * n_pixels+origin[1]),
+            (origin[0]+pixel_size * n_pixels, origin[1]),
+            (origin[0], origin[1])])
+        origin = (444720, 3751320)
+        polygon_b = shapely.geometry.Polygon([
+            (origin[0], origin[1]),
+            (origin[0], -pixel_size+origin[1]),
+            (origin[0]+pixel_size, -pixel_size+origin[1]),
+            (origin[0]+pixel_size, origin[1]),
+            (origin[0], origin[1])])
+        polygon_c = shapely.geometry.Polygon([
+            (origin[1]*2, origin[1]*3),
+            (origin[1]*2, -pixel_size+origin[1]*3),
+            (origin[1]*2+pixel_size,
+             -pixel_size+origin[1]*3),
+            (origin[1]*2+pixel_size, origin[1]*3),
+            (origin[1]*2, origin[1]*3)])
+        aggregating_vector_path = os.path.join(
+            self.workspace_dir, 'aggregate_vector')
+        _geometry_to_vector(
+            [polygon_a, polygon_b, polygon_c], aggregating_vector_path)
+        pixel_matrix = numpy.ones((n_pixels, n_pixels), numpy.float32)
+        target_nodata = None
+        raster_path = os.path.join(self.workspace_dir, 'raster.tif')
+        _array_to_raster(
+            pixel_matrix, target_nodata, raster_path)
+        with capture_logging(
+                logging.getLogger('pygeoprocessing')) as log_messages:
+            result = pygeoprocessing.zonal_statistics(
+                (raster_path, 1), aggregating_vector_path,
+                aggregate_layer_name=None,
+                ignore_nodata=True,
+                include_value_counts=True,
+                polygons_might_overlap=True)
+
+        # Raster is float32, so we expect a warning to be posted.
+        self.assertEqual(len(log_messages), 1)
+        self.assertEqual(log_messages[0].levelno, logging.WARNING)
+        self.assertIn('Value counts requested on a floating-point raster',
+                      log_messages[0].msg)
+        expected_result = {
+            0: {
+                'count': 81,
+                'max': 1.0,
+                'min': 1.0,
+                'nodata_count': 0,
+                'sum': 81.0,
+                'value_counts': {1.0: 81}},
+            1: {
+                'count': 1,
+                'max': 1.0,
+                'min': 1.0,
+                'nodata_count': 0,
+                'sum': 1.0,
+                'value_counts': {1.0: 1}},
+            2: {
+                'min': None,
+                'max': None,
+                'count': 0,
+                'nodata_count': 0,
+                'sum': 0.0,
+                'value_counts': {}}
+        }
+        self.assertEqual(result, expected_result)
+
     def test_zonal_statistics_nodata(self):
         """PGP.geoprocessing: test zonal stats function with non-overlap."""
         # create aggregating polygon
@@ -1374,13 +1507,63 @@ class TestGeoprocessing(unittest.TestCase):
 
         numpy.testing.assert_array_equal(result_array, expected_result)
 
-    def test_invoke_timed_callback(self):
-        """PGP.geoprocessing: cover a timed callback."""
-        reference_time = time.time()
-        time.sleep(0.1)
-        new_time = pygeoprocessing.geoprocessing._invoke_timed_callback(
-            reference_time, lambda: None, 0.05)
-        self.assertNotEqual(reference_time, new_time)
+    def test_timed_logging_adapter(self):
+        """PGP.geoprocessing: check timed logging."""
+        from pygeoprocessing.geoprocessing import TimedLoggingAdapter
+
+        pygeoprocessing_logger = logging.getLogger('pygeoprocessing')
+        with capture_logging(pygeoprocessing_logger) as captured_logging:
+            timed_logger = TimedLoggingAdapter(interval_s=0.1)
+            time.sleep(0.1)
+            timed_logger.warning('message 1')  # Logged
+            timed_logger.warning('message 2')  # Skipped
+            pygeoprocessing_logger.warning('normal 1')  # logged
+            time.sleep(0.1)
+            timed_logger.warning('message 3')  # logged
+            pygeoprocessing_logger.warning('normal 2')  # logged
+            timed_logger.warning('message 4')  # skipped
+            pygeoprocessing_logger.warning('normal 3')  # logged
+
+        self.assertEqual(len(captured_logging), 5)
+        expected_messages = [
+            'message 1', 'normal 1', 'message 3', 'normal 2', 'normal 3']
+        for record, expected_message in zip(captured_logging,
+                                            expected_messages):
+            # Check the message string
+            self.assertEqual(record.msg, expected_message)
+
+            # check that the function name logged is the name of this test
+            # (which is the calling function).  This is only possible on python
+            # 3.8 or later.
+            if sys.version_info >= (3, 8):
+                self.assertEqual(
+                    record.funcName, self.test_timed_logging_adapter.__name__)
+
+        # The rest of this test only applies to python 3.8+
+        if sys.version_info < (3, 8):
+            return
+
+        # Check the custom stack frame adjustment
+        with capture_logging(pygeoprocessing_logger) as captured_logging:
+            timed_logger = TimedLoggingAdapter(interval_s=0.1)
+
+            def _sub_stackframe():
+                time.sleep(0.5)  # make sure we pass the interval threshold
+                # The 4 is 1 more than the default, so the message SHOULD
+                # report that the test called it.
+                timed_logger.critical('DANGER', stacklevel=4)
+
+            _sub_stackframe()
+
+        self.assertEqual(len(captured_logging), 1)
+
+        record = captured_logging[0]
+        self.assertEqual(record.msg, 'DANGER')
+
+        # check that the function name logged is the name of this test
+        # (which is the parent of the calling function)
+        self.assertEqual(
+            record.funcName, self.test_timed_logging_adapter.__name__)
 
     def test_warp_raster(self):
         """PGP.geoprocessing: warp raster test."""
@@ -2278,7 +2461,7 @@ class TestGeoprocessing(unittest.TestCase):
 
     def test_raster_calculator_signed_byte(self):
         """PGP.geoprocessing: test that signed byte pixels interpreted."""
-        pixel_array = numpy.ones((128, 128), numpy.byte)
+        pixel_array = numpy.ones((128, 128), numpy.uint8)
         # ArcGIS will create a signed byte raster with an unsigned value of 255
         # that actually is supposed to represent -1, even though the nodata
         # value will be set as -1.
@@ -2317,7 +2500,7 @@ class TestGeoprocessing(unittest.TestCase):
 
     def test_new_raster_from_base_unsigned_byte(self):
         """PGP.geoprocessing: test that signed byte rasters copy over."""
-        pixel_array = numpy.ones((128, 128), numpy.byte)
+        pixel_array = numpy.ones((128, 128), numpy.uint8)
         pixel_array[0, 0] = 255  # 255 ubyte is -1 byte
         nodata_base = -1
         base_path = os.path.join(self.workspace_dir, 'base.tif')
@@ -2546,6 +2729,28 @@ class TestGeoprocessing(unittest.TestCase):
         expected_result = numpy.zeros((19, 9))
         result = pygeoprocessing.raster_to_numpy_array(target_raster_path)
         numpy.testing.assert_array_equal(expected_result, result)
+
+    def test_create_raster_from_bounding_box(self):
+        """PGP.geoprocessing: test create raster from bbox."""
+        bbox = [_DEFAULT_ORIGIN[0], _DEFAULT_ORIGIN[1],
+                _DEFAULT_ORIGIN[0] + 100, _DEFAULT_ORIGIN[1] + 145]
+        target_srs = osr.SpatialReference()
+        target_srs.ImportFromEPSG(_DEFAULT_EPSG)
+        target_wkt = target_srs.ExportToWkt()
+
+        target_raster_path = os.path.join(self.workspace_dir, 'raster.tif')
+        target_nodata = -12345
+        fill_value = 5678
+        pixel_size = (10, -10)
+        pygeoprocessing.create_raster_from_bounding_box(
+            bbox, target_raster_path, pixel_size, gdal.GDT_Int32,
+            target_wkt, target_nodata=target_nodata, fill_value=fill_value)
+
+        info = pygeoprocessing.get_raster_info(target_raster_path)
+        self.assertEqual(info['pixel_size'], pixel_size)
+        self.assertEqual(info['raster_size'], (10, 15))
+        self.assertEqual(info['nodata'], [target_nodata])
+        self.assertEqual(info['datatype'], gdal.GDT_Int32)
 
     def test_transform_box(self):
         """PGP.geoprocessing: test geotransforming lat/lng box to UTM10N."""
@@ -3557,7 +3762,7 @@ class TestGeoprocessing(unittest.TestCase):
                 [(a_raster_path, 1)], ['near'],
                 (regular_file_raster_path, 1),
                 overlap_algorithm='etch')
-        expected_message = 'Target stitch raster is not a raster.'
+        expected_message = 'Could not open'
         actual_message = str(cm.exception)
         self.assertTrue(
             expected_message in actual_message, actual_message)
@@ -4267,20 +4472,21 @@ class TestGeoprocessing(unittest.TestCase):
                 # Ignore the specific divide-by-zero warning we expect.
                 warnings.filterwarnings(
                     action="ignore",
-                    message="divide by zero encountered in true_divide",
+                    message=NUMPY_DIV_BY_ZERO_MSG,
                     category=RuntimeWarning
                 )
                 pygeoprocessing.symbolic.evaluate_raster_calculator_expression(
-                    divide_by_zero_expr, symbol_to_path_band_map, target_nodata,
-                    target_raster_path)
+                    divide_by_zero_expr, symbol_to_path_band_map,
+                    target_nodata, target_raster_path)
         expected_message = 'Encountered inf in calculation'
         actual_message = str(cm.exception)
         self.assertTrue(expected_message in actual_message, actual_message)
 
         with warnings.catch_warnings():
+            # Ignore the specific divide-by-zero warning we expect.
             warnings.filterwarnings(
                 action="ignore",
-                message="divide by zero encountered in true_divide",
+                message=NUMPY_DIV_BY_ZERO_MSG,
                 category=RuntimeWarning
             )
             pygeoprocessing.symbolic.evaluate_raster_calculator_expression(
@@ -4297,7 +4503,7 @@ class TestGeoprocessing(unittest.TestCase):
             with warnings.catch_warnings():
                 warnings.filterwarnings(
                     action="ignore",
-                    message="invalid value encountered in true_divide",
+                    message=NUMPY_DIV_INVALID_VAL_MSG,
                     category=RuntimeWarning
                 )
                 pygeoprocessing.symbolic.evaluate_raster_calculator_expression(
@@ -4310,7 +4516,7 @@ class TestGeoprocessing(unittest.TestCase):
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 action="ignore",
-                message="invalid value encountered in true_divide",
+                message=NUMPY_DIV_INVALID_VAL_MSG,
                 category=RuntimeWarning
             )
             pygeoprocessing.symbolic.evaluate_raster_calculator_expression(
@@ -4398,14 +4604,16 @@ class TestGeoprocessing(unittest.TestCase):
             text_file.write('test')
 
         self.assertEqual(
-            pygeoprocessing.get_gis_type(text_file_path),
-            pygeoprocessing.UNKNOWN_TYPE)
-        self.assertEqual(
             pygeoprocessing.get_gis_type(raster_path),
             pygeoprocessing.RASTER_TYPE)
         self.assertEqual(
             pygeoprocessing.get_gis_type(vector_path),
             pygeoprocessing.VECTOR_TYPE)
+
+        with self.assertRaises(ValueError) as cm:
+            pygeoprocessing.get_gis_type(text_file_path)
+        actual_message = str(cm.exception)
+        self.assertTrue('Could not open' in actual_message, actual_message)
 
         with self.assertRaises(ValueError) as cm:
             pygeoprocessing.get_gis_type('totally_fake_file')
@@ -4728,3 +4936,110 @@ class TestGeoprocessing(unittest.TestCase):
 
         self.assertIn(
             "The fields and attributes for feature 0", str(cm.exception))
+
+    def test_raster_reduce(self):
+        """PGP: test raster_reduce can calculate a sum."""
+        block_size = 256
+        array = numpy.ones((block_size * 2, block_size * 2))
+        raster_path = os.path.join(self.workspace_dir, 'raster.tif')
+        _array_to_raster(array, -1, raster_path)
+
+        def sum_blocks(total, block): return total + numpy.sum(block)
+        spy_sum_blocks = unittest.mock.Mock(wraps=sum_blocks)
+        result = pygeoprocessing.raster_reduce(spy_sum_blocks, (raster_path, 1), 0)
+        self.assertEqual(result, numpy.sum(array))
+
+        # assert sum_blocks was called with the correct arguments each time
+        # default block size is 256x256 resulting in four calls
+        for i, (_, (total, block), _) in enumerate(spy_sum_blocks.mock_calls):
+            self.assertEqual(total, i * block_size * block_size)
+            numpy.testing.assert_array_equal(
+                block, numpy.ones(block_size ** 2))  # flattened block
+
+    def test_raster_reduce_mask_nodata(self):
+        """PGP: test raster_reduce can mask out nodata by default."""
+        block_size = 256
+        nodata = -2
+        array = numpy.ones((block_size * 2, block_size * 2))
+        array[0][0] = nodata  # set a pixel to nodata
+        raster_path = os.path.join(self.workspace_dir, 'raster.tif')
+        _array_to_raster(array, nodata, raster_path)
+
+        def sum_blocks(total, block): return total + numpy.sum(block)
+
+        # by default, nodata should be masked out
+        result = pygeoprocessing.raster_reduce(sum_blocks, (raster_path, 1), 0)
+        # the nodata pixel should not be counted
+        self.assertEqual(result, array.size - 1)
+
+        # set mask_nodata=False to allow nodata
+        result = pygeoprocessing.raster_reduce(
+            sum_blocks, (raster_path, 1), 0, mask_nodata=False)
+        # the nodata pixel should be counted
+        self.assertEqual(result, array.size - 3)
+
+    def test_build_overviews_gtiff(self):
+        """PGP: test raster overviews."""
+        array = numpy.ones((2000, 1000), dtype=numpy.byte)
+
+        for internal, expected_filecount, levels in (
+                (True, 1, 'auto'), (False, 2, [2, 4])):
+            # Rewriting raster on each iteration to ensure we're working with a
+            # fresh raster each time.
+            raster_path = os.path.join(self.workspace_dir, 'raster.tif')
+            _array_to_raster(array, 255, raster_path)
+            pygeoprocessing.build_overviews(raster_path,
+                                            internal=internal,
+                                            resample_method='near',
+                                            levels=levels)
+
+            # internal overviews mean only 1 file in raster
+            self.assertEqual(len(os.listdir(self.workspace_dir)),
+                             expected_filecount)
+            try:
+                raster = gdal.Open(raster_path)
+                band = raster.GetRasterBand(1)
+                self.assertEqual(band.GetOverviewCount(), 2)
+
+                for ovr_index, (shape_x, shape_y) in enumerate(
+                        [(500, 1000), (250, 500)]):
+                    overview = band.GetOverview(ovr_index)
+                    self.assertEqual(overview.XSize, shape_x)
+                    self.assertEqual(overview.YSize, shape_y)
+                    numpy.testing.assert_array_equal(
+                        overview.ReadAsArray(),
+                        numpy.ones((shape_y, shape_x), dtype=array.dtype))
+            finally:
+                band = None
+                raster = None
+
+        # Test that an error was raised if we try to re-build overviews on a
+        # raster that already has them.
+        with self.assertRaises(ValueError) as cm:
+            pygeoprocessing.build_overviews(raster_path)
+        self.assertIn("Raster already has overviews", str(cm.exception))
+
+        # Forcibly overwriting the overviews should work fine, though.
+        pygeoprocessing.build_overviews(raster_path, overwrite=True)
+
+        # Check that we can catch invalid resample methods
+        with self.assertRaises(ValueError) as cm:
+            pygeoprocessing.build_overviews(
+                raster_path, overwrite=True,
+                resample_method='invalid choice')
+        self.assertIn('Invalid overview resample method: "invalid choice"',
+                      str(cm.exception))
+
+    def test_get_raster_info_overviews(self):
+        """PGP: raster info about overviews."""
+        array = numpy.ones((2000, 1000), dtype=numpy.byte)
+        raster_path = os.path.join(self.workspace_dir, 'raster.tif')
+        _array_to_raster(array, 255, raster_path)
+        pygeoprocessing.build_overviews(
+            raster_path, resample_method='near')
+
+        raster_info = pygeoprocessing.get_raster_info(raster_path)
+
+        # The ordering of x, y is reversed from the numpy array shape.
+        self.assertEqual(
+            raster_info['overviews'], [(500, 1000), (250, 500)])
