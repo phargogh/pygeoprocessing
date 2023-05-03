@@ -589,13 +589,14 @@ def raster_calculator(
                     LOGGER.error("stats_worker_thread.join() timed out")
                     raise RuntimeError(
                         "stats_worker_thread.join() timed out")
-                if sys.version_info >= (3, 8) and use_shared_memory:
-                    LOGGER.debug(
-                        f'unlink shared memory for process {os.getpid()}')
-                    shared_memory.close()
-                    shared_memory.unlink()
-                    LOGGER.debug(
-                        f'unlinked shared memory for process {os.getpid()}')
+
+            if sys.version_info >= (3, 8) and use_shared_memory:
+                LOGGER.debug(
+                    f'unlink shared memory for process {os.getpid()}')
+                shared_memory.close()
+                shared_memory.unlink()
+                LOGGER.debug(
+                    f'unlinked shared memory for process {os.getpid()}')
 
             # check for an exception in the workers, otherwise get result
             # and pass to writer
@@ -3128,12 +3129,10 @@ def convolve_2d(
                 yoff=target_offset_data['yoff'])
 
             mask_pixels_processed += target_block.size
-            percent_processed = (100.0 * float(mask_pixels_processed) / (
-                n_cols_signal * n_rows_signal))
             timed_logger.info(
-                "convolution nodata normalizer approximately %.1f%% "
-                "complete on %s", percent_processed,
-                os.path.basename(signal_path_band[0]))
+                f"""convolution nodata normalizer approximately {
+                100 * mask_pixels_processed / (n_cols_signal * n_rows_signal)
+                :.1f}% complete on {os.path.basename(target_path)}""")
 
         mask_raster = None
         mask_band = None
