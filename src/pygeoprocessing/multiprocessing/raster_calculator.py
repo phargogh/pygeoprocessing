@@ -528,7 +528,7 @@ def raster_calculator(
             args=(stats_worker_queue, len(block_offset_list)))
         stats_worker.start()
 
-    LOGGER.debug('start workers')
+    LOGGER.debug(f'starting {n_workers} workers')
     processing_state = manager.dict()
     processing_state['blocks_complete'] = 0
     processing_state['total_blocks'] = len(block_offset_list)
@@ -539,7 +539,7 @@ def raster_calculator(
     target_write_lock = manager.Lock()
     block_offset_queue = multiprocessing.Queue(n_workers)
     process_list = []
-    for _ in range(n_workers):
+    for index, _ in enumerate(range(n_workers)):
         shared_memory = None
         if calc_raster_stats:
             if sys.version_info >= (3, 8) and use_shared_memory:
@@ -552,6 +552,7 @@ def raster_calculator(
                 stats_worker_queue, nodata_target, target_raster_path,
                 target_write_lock, processing_state, shared_memory))
         worker.start()
+        LOGGER.debug(f'Process {index+1} started: {worker}')
         process_list.append((worker, shared_memory))
 
     # Fill the work queue
