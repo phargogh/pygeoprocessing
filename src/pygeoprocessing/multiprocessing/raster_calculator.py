@@ -552,7 +552,7 @@ def raster_calculator(
                 stats_worker_queue, nodata_target, target_raster_path,
                 target_write_lock, processing_state, shared_memory))
         worker.start()
-        LOGGER.debug(f'Process {index+1} started: {worker}')
+        LOGGER.debug(f'Process {index+1} of {n_workers} started: {worker}')
         process_list.append((worker, shared_memory))
 
     # Fill the work queue
