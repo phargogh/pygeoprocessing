@@ -96,7 +96,8 @@ _GDAL_WARP_ALGORITHMS = set(_GDAL_WARP_ALGORITHMS)
 _GDAL_WARP_ALGORITHMS.discard('-r')
 _GDAL_WARP_ALGOS_FOR_HUMAN_EYES = "|".join(_GDAL_WARP_ALGORITHMS)
 LOGGER.debug(
-    f'Detected warp algorithms: {", ".join(_GDAL_WARP_ALGOS_FOR_HUMAN_EYES)}')
+    'Detected warp algorithms: '
+    f'{_GDAL_WARP_ALGOS_FOR_HUMAN_EYES.replace("|", ", ")}')
 
 
 class TimedLoggingAdapter(logging.LoggerAdapter):
