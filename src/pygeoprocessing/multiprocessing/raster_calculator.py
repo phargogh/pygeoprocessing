@@ -7,6 +7,7 @@ import os
 import pprint
 import signal
 import sys
+import threading
 import time
 
 import numpy
@@ -25,6 +26,11 @@ from ..geoprocessing_core import DEFAULT_GTIFF_CREATION_TUPLE_OPTIONS
 
 if sys.version_info >= (3, 8):
     import multiprocessing.shared_memory
+
+VALID_PARALLEL_METHODS = {
+    'threading': threading.Thread,
+    'multiprocessing': multiprocessing.Process,
+}
 
 
 def _block_success_handler(callback_state):
@@ -376,7 +382,8 @@ def raster_calculator(
         n_workers=max(1, multiprocessing.cpu_count()),
         calc_raster_stats=True, use_shared_memory=False,
         largest_block=_LARGEST_ITERBLOCK,
-        raster_driver_creation_tuple=DEFAULT_GTIFF_CREATION_TUPLE_OPTIONS):
+        raster_driver_creation_tuple=DEFAULT_GTIFF_CREATION_TUPLE_OPTIONS,
+        parallelism_method='multiprocessing'):
     """Apply local a raster operation on a stack of rasters.
 
     This function applies a user defined function across a stack of
@@ -545,7 +552,7 @@ def raster_calculator(
             if sys.version_info >= (3, 8) and use_shared_memory:
                 shared_memory = multiprocessing.shared_memory.SharedMemory(
                     create=True, size=block_size_bytes)
-        worker = multiprocessing.Process(
+        worker = VALID_PARALLEL_METHODS[parallelism_method](
             target=_raster_calculator_worker,
             args=(
                 block_offset_queue, base_canonical_arg_list, local_op,
