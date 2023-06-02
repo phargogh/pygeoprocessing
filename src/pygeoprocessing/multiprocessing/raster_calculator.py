@@ -158,16 +158,39 @@ def _raster_calculator_worker(
                 "shape %s but got this instead: %s" % (
                     blocksize, target_block))
 
-        with write_lock:
-            target_raster = gdal.OpenEx(
-                target_raster_path, gdal.OF_RASTER | gdal.GA_Update)
-            target_band = target_raster.GetRasterBand(1)
-            target_band.WriteArray(
-                target_block, yoff=block_offset['yoff'],
-                xoff=block_offset['xoff'])
-            _block_success_handler(processing_state)
-            target_band = None
-            target_raster = None
+        write_completed = False
+        n_attempts = 1
+        max_n_attempts = 10
+        while (not write_completed) and (n_attempts <= max_n_attempts):
+            with write_lock:
+                try:
+                    target_raster = gdal.OpenEx(
+                        target_raster_path, gdal.OF_RASTER | gdal.GA_Update)
+                    target_band = target_raster.GetRasterBand(1)
+                    target_band.WriteArray(
+                        target_block, yoff=block_offset['yoff'],
+                        xoff=block_offset['xoff'])
+                    _block_success_handler(processing_state)
+                    write_completed = True
+                except Exception as e:
+                    LOGGER.debug(
+                        f"Retrying failed block (attempt {n_attempts} at "
+                        f"yoff={block_offset['yoff']} "
+                        f"xoff={block_offset['xoff']}: {str(e)}")
+                    n_attempts += 1
+                finally:
+                    target_band = None
+                    target_raster = None
+
+        if n_attempts == max_n_attempts:
+            xoff = block_offset['xoff']
+            yoff = block_offset['yoff']
+            filepath = (
+                f'{target_raster_path}.incomplete.xoff{xoff}.yoff{yoff}.npy')
+            target_block.tofile(filepath)
+            LOGGER.warning(
+                "Block not successfully written to raster after "
+                f"{max_n_attempts}. Block saved to {filepath}")
 
         # send result to stats calculator
         if not stats_worker_queue:
