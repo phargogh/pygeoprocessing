@@ -564,6 +564,11 @@ def raster_calculator(
             payload = stats_worker_queue.get(True, max_timeout)
             if payload is not None:
                 target_min, target_max, target_mean, target_stddev = payload
+                # cmath.sqrt() always returns a complex number and cython 3.0+
+                # will return a complex.  This is because the worker raises a
+                # value to the 0.5 power.
+                if isinstance(target_stddev, complex):
+                    target_stddev = target_stddev.real
                 target_band.SetStatistics(
                     float(target_min), float(target_max), float(target_mean),
                     float(target_stddev))
