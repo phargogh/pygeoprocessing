@@ -406,7 +406,7 @@ def raster_calculator(
         calc_raster_stats=True, use_shared_memory=False,
         largest_block=_LARGEST_ITERBLOCK,
         raster_driver_creation_tuple=DEFAULT_GTIFF_CREATION_TUPLE_OPTIONS,
-        parallelism_method='multiprocessing'):
+        parallelism_method='multiprocessing', max_timeout_s=_MAX_TIMEOUT):
     """Apply local a raster operation on a stack of rasters.
 
     This function applies a user defined function across a stack of
@@ -582,7 +582,9 @@ def raster_calculator(
                 stats_worker_queue, nodata_target, target_raster_path,
                 target_write_lock, processing_state, shared_memory))
         worker.start()
-        LOGGER.debug(f'Process {index+1} of {n_workers} started: {worker}')
+        LOGGER.debug(
+            f'{parallelism_method} worker {index+1} of {n_workers} '
+            f'started: {worker}')
         process_list.append((worker, shared_memory))
 
     # Fill the work queue
@@ -594,7 +596,7 @@ def raster_calculator(
 
     if calc_raster_stats:
         LOGGER.info('wait for stats worker to complete')
-        stats_worker.join(_MAX_TIMEOUT)
+        stats_worker.join(max_timeout_s)
         if stats_worker.is_alive():
             LOGGER.error(
                 f'stats worker {stats_worker.pid} '
@@ -607,12 +609,12 @@ def raster_calculator(
     # wait for the workers to join
     LOGGER.info('all work sent, waiting for workers to finish')
     for worker, shared_memory in process_list:
-        worker.join(_MAX_TIMEOUT)
+        worker.join(max_timeout_s)
         if worker.is_alive():
             LOGGER.error(
                 f'worker {worker.pid} didn\'t terminate, sending kill signal.')
             try:
-                os.kill(stats_worker.pid, signal.SIGTERM)
+                os.kill(worker.pid, signal.SIGTERM)
             except Exception:
                 LOGGER.exception(f'unable to kill {worker.pid}')
         if shared_memory is not None:
@@ -620,7 +622,7 @@ def raster_calculator(
             shared_memory.unlink()
 
     if calc_raster_stats:
-        payload = stats_worker_queue.get(True, _MAX_TIMEOUT)
+        payload = stats_worker_queue.get(True, max_timeout_s)
         if payload is not None:
             target_min, target_max, target_mean, target_stddev = payload
             target_raster = gdal.OpenEx(
