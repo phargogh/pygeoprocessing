@@ -1236,11 +1236,8 @@ def align_and_resize_raster_stack(
                 base_raster_path_list, target_raster_path_list,
                 resample_method_list)):
 
-            def _my_warp_raster(*args, **kwargs):
-                warp_raster(*args, **kwargs)
-
             my_executor.submit(
-                _my_warp_raster, base_path, target_pixel_size, target_path,
+                warp_raster, base_path, target_pixel_size, target_path,
                 resample_method,
                 target_bb=target_bounding_box,
                 raster_driver_creation_tuple=raster_driver_creation_tuple,
