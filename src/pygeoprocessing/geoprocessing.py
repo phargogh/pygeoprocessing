@@ -1,6 +1,7 @@
 # coding=UTF-8
 """A collection of raster and vector algorithms and utilities."""
 import collections
+import concurrent.futures
 import functools
 import logging
 import math
@@ -63,6 +64,27 @@ class ReclassificationMissingValuesError(Exception):
             f'entries in the value map: {value_map}.')
         self.missing_values = missing_values
         super().__init__(self.msg)
+
+
+class _SynchronousPromise():
+    def __init__(self, *args):
+        self.args = args
+        self.done = True
+
+
+class _SynchronousExecutor():
+    def submit(self, fn, /, *args, **kwargs):
+        _ = fn(*args, **kwargs)
+        return _SynchronousPromise(*args)
+
+    def shutdown(self, wait=True, *, cancel_futures=False):
+        return
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args, **kwargs):
+        LOGGER.debug(str(args) + str(kwargs))
 
 
 LOGGER = logging.getLogger(__name__)
@@ -870,7 +892,7 @@ def align_and_resize_raster_stack(
         vector_mask_options=None, gdal_warp_options=None,
         raster_driver_creation_tuple=DEFAULT_GTIFF_CREATION_TUPLE_OPTIONS,
         osr_axis_mapping_strategy=DEFAULT_OSR_AXIS_MAPPING_STRATEGY,
-        working_dir=None):
+        working_dir=None, executor=None):
     """Generate rasters from a base such that they align geospatially.
 
     This function resizes base rasters that are in the same geospatial
@@ -1193,22 +1215,41 @@ def align_and_resize_raster_stack(
                       if 'mask_vector_where_filter' in mask_options
                       else None))
 
-    for index, (base_path, target_path, resample_method) in enumerate(zip(
-            base_raster_path_list, target_raster_path_list,
-            resample_method_list)):
-        warp_raster(
-            base_path, target_pixel_size, target_path, resample_method,
-            target_bb=target_bounding_box,
-            raster_driver_creation_tuple=(raster_driver_creation_tuple),
-            target_projection_wkt=target_projection_wkt,
-            base_projection_wkt=(
-                None if not base_projection_wkt_list else
-                base_projection_wkt_list[index]),
-            mask_options=mask_options,
-            gdal_warp_options=gdal_warp_options)
-        LOGGER.info(
-            '%d of %d aligned: %s', index+1, n_rasters,
-            os.path.basename(target_path))
+    if executor:
+        if isinstance(executor, concurrent.futures.Executor):
+            pass
+        elif executor.startswith('multiprocessing'):  # e.g. multiprocessing:4
+            executor = concurrent.futures.ProcessPoolExecutor(
+                int(executor.split(':')[-1]))
+        elif executor.startswith('threading'):  # e.g. threading:4
+            executor = concurrent.futures.ThreadPoolExecutor(
+                int(executor.split(':')[-1]))
+        else:
+            raise ValueError("bad executor string")
+    else:  # no executor, so use _SynchronousExecutor
+        executor = _SynchronousExecutor()
+
+    LOGGER.debug(executor)
+
+    with executor as my_executor:
+        for index, (base_path, target_path, resample_method) in enumerate(zip(
+                base_raster_path_list, target_raster_path_list,
+                resample_method_list)):
+
+            def _my_warp_raster(*args, **kwargs):
+                warp_raster(*args, **kwargs)
+
+            my_executor.submit(
+                _my_warp_raster, base_path, target_pixel_size, target_path,
+                resample_method,
+                target_bb=target_bounding_box,
+                raster_driver_creation_tuple=raster_driver_creation_tuple,
+                target_projection_wkt=target_projection_wkt,
+                base_projection_wkt=(
+                    None if not base_projection_wkt_list else
+                    base_projection_wkt_list[index]),
+                mask_options=mask_options,
+                gdal_warp_options=gdal_warp_options)
 
     LOGGER.info("aligned all %d rasters.", n_rasters)
 
