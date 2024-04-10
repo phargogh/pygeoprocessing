@@ -10,12 +10,24 @@ incoming DEM type is an int64 type and values in that dem exceed 2^52 but GDAL
 does not support int64 rasters so no precision loss is possible with a
 float64.
 
-D8 float direction conventions follow TauDEM where each flow direction
-is encoded as::
+D8 flow direction conventions encode the flow direction as::
 
      3 2 1
      4 x 0
      5 6 7
+
+This is slightly different from how TauDEM encodes flow direction, which is as::
+    4 3 2
+    5 x 1
+    6 7 8
+
+To convert a TauDEM flow direction raster to a pygeoprocessing-compatible flow
+direction raster, the following ``raster_map`` call may be used::
+
+    taudem_flow_dir_path = 'taudem_d8_flow_dir.tif'
+    pygeoprocessing.raster_map(
+        lambda d: d+1, [taudem_flow_dir_path],
+        'pygeoprocessing_d8_flow_dir.tif')
 """
 import collections
 import logging
@@ -114,22 +126,22 @@ cdef extern from "LRUCache.h" nogil:
 # this is the class type that'll get stored in the priority queue
 cdef struct PixelType:
     double value  # pixel value
-    int xi  # pixel x coordinate in the raster
-    int yi  # pixel y coordinate in the raster
+    unsigned int xi  # pixel x coordinate in the raster
+    unsigned int yi  # pixel y coordinate in the raster
     int priority # for breaking ties if two `value`s are equal.
 
 # this struct is used to record an intermediate flow pixel's last calculated
 # direction and the flow accumulation value so far
 cdef struct FlowPixelType:
-    int xi
-    int yi
+    unsigned int xi
+    unsigned int yi
     int last_flow_dir
     double value
 
 cdef struct DecayingValue:
-    double decayed_value
-    double min_value
-
+    double decayed_value  # The value, which will be progressively updated as it decays
+    double min_value  # The minimum value before the Decaying Value should be ignored.
+
 cdef struct WeightedFlowPixelType:
     int xi
     int yi
@@ -137,35 +149,36 @@ cdef struct WeightedFlowPixelType:
     double value
     queue[DecayingValue] decaying_values
 
+
 # this struct is used in distance_to_channel_mfd to add up each pixel's
 # weighted distances and flow weights
 cdef struct MFDFlowPixelType:
-    int xi
-    int yi
+    unsigned int xi
+    unsigned int yi
     int last_flow_dir
     double sum_of_weighted_distances
     double sum_of_weights
 
 # used when constructing geometric streams, the x/y coordinates represent
-# a seed point to walk upstream from, the upstream_flow_dir indicates the
+# a seed point to walk upstream from, the upstream_d8_dir indicates the
 # d8 flow direction to walk and the source_id indicates the source stream it
 # spawned from
 cdef struct StreamConnectivityPoint:
-    int xi
-    int yi
+    unsigned int xi
+    unsigned int yi
     int upstream_d8_dir
-    int source_id
+    unsigned int source_id
 
 # used to record x/y locations as needed
 cdef struct CoordinateType:
-    int xi
-    int yi
+    unsigned int xi
+    unsigned int yi
 
 
 cdef struct FinishType:
-    int xi
-    int yi
-    int n_pushed
+    unsigned int xi
+    unsigned int yi
+    unsigned int n_pushed
 
 # this ctype is used to store the block ID and the block buffer as one object
 # inside Managed Raster
@@ -209,8 +222,8 @@ cdef class _ManagedRaster:
     cdef int block_ymod
     cdef int block_xbits
     cdef int block_ybits
-    cdef int raster_x_size
-    cdef int raster_y_size
+    cdef unsigned int raster_x_size
+    cdef unsigned int raster_y_size
     cdef int block_nx
     cdef int block_ny
     cdef int write_mode
@@ -675,15 +688,15 @@ def fill_pits(
     """
     # These variables are used to iterate over the DEM using `iterblock`
     # indexes
-    cdef int win_ysize, win_xsize, xoff, yoff
+    cdef unsigned int win_ysize, win_xsize, xoff, yoff
 
     # the _root variables remembers the pixel index where the plateau/pit
     # region was first detected when iterating over the DEM.
-    cdef int xi_root, yi_root
+    cdef unsigned int xi_root, yi_root
 
     # these variables are used as pixel or neighbor indexes. where _q
     # represents a value out of a queue, and _n is related to a neighbor pixel
-    cdef int i_n, xi, yi, xi_q, yi_q, xi_n, yi_n
+    cdef unsigned int i_n, xi, yi, xi_q, yi_q, xi_n, yi_n
 
     # these are booleans used to remember the condition that caused a loop
     # to terminate, though downhill and nodata are equivalent for draining,
@@ -713,7 +726,7 @@ def fill_pits(
     cdef PitPriorityQueueType pit_queue
 
     # properties of the parallel rasters
-    cdef int raster_x_size, raster_y_size, n_x_blocks
+    cdef unsigned int raster_x_size, raster_y_size, n_x_blocks
 
     # variables to remember heights of DEM
     cdef double center_val, dem_nodata, fill_height
@@ -722,6 +735,8 @@ def fill_pits(
     # algorithm, it's written into the mask rasters to indicate which pixels
     # have already been processed
     cdef int feature_id
+
+    cdef unsigned long current_pixel
 
     # used to handle the case for single outlet mode
     cdef int single_outlet=0, outlet_x=-1, outlet_y=-1
@@ -1107,11 +1122,11 @@ def flow_dir_d8(
     # data loss for any lower type that might be used in
     # `dem_raster_path_band[0]`.
     cdef numpy.ndarray[numpy.float64_t, ndim=2] dem_buffer_array
-    cdef int win_ysize, win_xsize, xoff, yoff
+    cdef unsigned int win_ysize, win_xsize, xoff, yoff
 
     # the _root variables remembers the pixel index where the plateau/pit
     # region was first detected when iterating over the DEM.
-    cdef int xi_root, yi_root
+    cdef unsigned int xi_root, yi_root
 
     # these variables are used as pixel or neighbor indexes. where _q
     # represents a value out of a queue, and _n is related to a neighbor pixel
@@ -1142,7 +1157,9 @@ def flow_dir_d8(
     cdef queue[int] nodata_flow_dir_queue
 
     # properties of the parallel rasters
-    cdef int raster_x_size, raster_y_size
+    cdef unsigned int raster_x_size, raster_y_size
+
+    cdef unsigned long current_pixel
 
     # used for time-delayed logging
     cdef time_t last_log_time
@@ -1464,6 +1481,18 @@ def flow_accumulation_d8(
             weight. If ``None``, 1 is the default flow accumulation weight.
             This raster must be the same dimensions as
             ``flow_dir_mfd_raster_path_band``.
+        custom_decay_factor=None (float or tuple): a custom decay factor, either
+            represented as a float (where the same decay factor is applied to
+            all valid pixels) or a path/band tuple for a raster where pixel
+            values represent spatially-explicit decay values. As the on-pixel
+            load passes through a pixel, the decay factor is applied, so you
+            could think of this layer as representing the proportion of a
+            pollutant that is absorbed by the landscape as it passes through
+            along the flowpath.
+        min_decay_proportion=0.001 (float): A value representing the minimum
+            decayed value that should continue to be tracked along the flow
+            path when using a custom decay factor.  If the upstream decayed
+            contribution falls below this value, it is not included.
         raster_driver_creation_tuple (tuple): a tuple containing a GDAL driver
             name string as the first element and a GDAL creation options
             tuple/list as the second. Defaults to a GTiff driver tuple
@@ -1478,15 +1507,15 @@ def flow_accumulation_d8(
     # data loss for any lower type that might be used in
     # `dem_raster_path_band[0]`.
     cdef numpy.ndarray[numpy.uint8_t, ndim=2] flow_dir_buffer_array
-    cdef int win_ysize, win_xsize, xoff, yoff
+    cdef unsigned int win_ysize, win_xsize, xoff, yoff
 
     # the _root variables remembers the pixel index where the plateau/pit
     # region was first detected when iterating over the DEM.
-    cdef int xi_root, yi_root
+    cdef unsigned int xi_root, yi_root
 
     # these variables are used as pixel or neighbor indexes.
     # _n is related to a neighbor pixel
-    cdef int i_n, xi, yi, xi_n, yi_n
+    cdef unsigned int i_n, xi, yi, xi_n, yi_n
 
     # used to hold flow direction values
     cdef int flow_dir, upstream_flow_dir, flow_dir_nodata
@@ -1505,7 +1534,9 @@ def flow_accumulation_d8(
     cdef WeightedFlowPixelType flow_pixel
 
     # properties of the parallel rasters
-    cdef int raster_x_size, raster_y_size
+    cdef unsigned int raster_x_size, raster_y_size
+
+    cdef unsigned long current_pixel
 
     # used for time-delayed logging
     cdef time_t last_log_time
@@ -1549,8 +1580,7 @@ def flow_accumulation_d8(
     cdef short do_decayed_accumulation = False
     cdef short use_const_decay_factor = False
     cdef float decay_factor = 1.0
-    cdef double min_allowed_decayed_load, local_decay_factor
-    cdef double on_pixel_load
+    cdef double decay_factor_nodata
     if custom_decay_factor is not None:
         do_decayed_accumulation = True
         if isinstance(custom_decay_factor, (int, float)):
@@ -1563,6 +1593,12 @@ def flow_accumulation_d8(
                         custom_decay_factor))
             decay_factor_managed_raster = _ManagedRaster(
                 custom_decay_factor[0], custom_decay_factor[1], 0)
+            _tmp_decay_factor_nodata = pygeoprocessing.get_raster_info(
+                custom_decay_factor[0])['nodata'][0]
+            if _tmp_decay_factor_nodata is None:
+                decay_factor_nodata = float('nan')
+            else:
+                decay_factor_nodata = _tmp_decay_factor_nodata
 
     flow_dir_raster_info = pygeoprocessing.get_raster_info(
         flow_dir_raster_path_band[0])
@@ -1588,7 +1624,7 @@ def flow_accumulation_d8(
         if ctime(NULL) - last_log_time > _LOGGING_PERIOD:
             last_log_time = ctime(NULL)
             current_pixel = xoff + yoff * raster_x_size
-            LOGGER.info('(flow accum d8):%.1f%% complete', 100.0 * current_pixel / <float>(
+            LOGGER.info('Flow accumulation D8 %.1f%% complete', 100.0 * current_pixel / <float>(
                 raster_x_size * raster_y_size))
 
         # make a buffer big enough to capture block and boundaries around it
@@ -1607,7 +1643,9 @@ def flow_accumulation_d8(
         xi_n = -1
         yi_n = -1
 
-        # search block for to set flow direction
+        # Search the block for root pixels.
+        # A root pixel is a flow direction pixel that is nodata, which means it
+        # may be a drain just off the edge.
         for yi in range(1, win_ysize+1):
             for xi in range(1, win_xsize+1):
                 flow_dir = flow_dir_buffer_array[yi, xi]
@@ -1641,7 +1679,7 @@ def flow_accumulation_d8(
                     flow_pixel = search_stack.top()
                     search_stack.pop()
 
-                    # Empty when not doing decaying flow accumulation.
+                    # Load any decaying values from upstream into the current flow pixel.
                     while not decay_from_upstream.empty():
                         upstream_decaying_value = decay_from_upstream.front()
                         decay_from_upstream.pop()
@@ -1654,29 +1692,20 @@ def flow_accumulation_d8(
                         yi_n = flow_pixel.yi+D8_YOFFSET[i_n]
                         if (xi_n < 0 or xi_n >= raster_x_size or
                                 yi_n < 0 or yi_n >= raster_y_size):
-                            # neighbor not upstream: off edges of the raster.
+                            # neighbor not upstream: off edges of the raster
                             continue
                         upstream_flow_dir = <int>flow_dir_managed_raster.get(
                             xi_n, yi_n)
                         if upstream_flow_dir == flow_dir_nodata or (
                                 upstream_flow_dir != D8_REVERSE_DIRECTION[i_n]):
-                            # neighbor not upstream: nodata or doesn't flow in.
+                            # neighbor not upstream: is nodata or doesn't flow in
                             continue
-
-                        if do_decayed_accumulation:
-                            if use_const_decay_factor:
-                                upstream_transport_factor = decay_factor
-                            else:
-                                upstream_transport_factor = (
-                                    decay_factor_managed_raster.get(xi_n, yi_n))
-                                # TODO: how to handle nodata here?  Assume decay factor of 0?
 
                         upstream_flow_accum = <double>(
                             flow_accum_managed_raster.get(xi_n, yi_n))
                         if _is_close(upstream_flow_accum, flow_accum_nodata, 1e-8, 1e-5):
-                            # Process upstream before this one.
-                            # Flow accumulation pixel is nodata until it and
-                            # everything upstream of it has been computed.
+                            # Flow accumulation pixel is nodata until it and everything
+                            # upstream of it has been computed.
                             if weight_raster is not None:
                                 weight_val = <double>weight_raster.get(
                                     xi_n, yi_n)
@@ -1684,12 +1713,13 @@ def flow_accumulation_d8(
                                     weight_val = 0.0
                             else:
                                 weight_val = 1.0
-
-                            flow_pixel.last_flow_dir = i_n
                             if do_decayed_accumulation:
                                 flow_pixel.decaying_values.push(
                                     DecayingValue(weight_val,
                                                   weight_val * min_decay_proportion))
+
+                            # process upstream pixel before this neighbor
+                            flow_pixel.last_flow_dir = i_n
                             search_stack.push(flow_pixel)
                             search_stack.push(
                                 WeightedFlowPixelType(xi_n, yi_n, 0, weight_val,
@@ -1702,15 +1732,23 @@ def flow_accumulation_d8(
 
                     if not upstream_pixels_remain:
                         # flow_pixel.value already has the on-pixel load
-                        # from upstream, so we just need to add to it from the
-                        # decaying values queue.
+                        # from upstream, so we just need to add it from the
+                        # decaying values queue
                         if do_decayed_accumulation:
+                            if use_const_decay_factor:
+                                upstream_transport_factor = decay_factor
+                            else:
+                                upstream_transport_factor = (
+                                    decay_factor_managed_raster.get(flow_pixel.xi, flow_pixel.yi))
+                                # If nodata, assume nothing will be transported from this pixel.
+                                if _is_close(upstream_transport_factor, decay_factor_nodata, 1e-8, 1e-5):
+                                    upstream_transport_factor = 0.0
+
                             while not flow_pixel.decaying_values.empty():
                                 decayed_value = flow_pixel.decaying_values.front()
                                 flow_pixel.decaying_values.pop()
                                 decayed_value.decayed_value *= upstream_transport_factor
                                 flow_pixel.value += decayed_value.decayed_value
-
                                 decay_from_upstream.push(decayed_value)
 
                         flow_accum_managed_raster.set(
@@ -1723,7 +1761,7 @@ def flow_accumulation_d8(
             decay_factor_managed_raster.close()
     if weight_raster is not None:
         weight_raster.close()
-    LOGGER.info('%.1f%% complete', 100.0)
+    LOGGER.info('Flow accumulation D8 %.1f%% complete', 100.0)
 
 
 def flow_dir_mfd(
@@ -1771,11 +1809,11 @@ def flow_dir_mfd(
 
     # the _root variables remembers the pixel index where the plateau/pit
     # region was first detected when iterating over the DEM.
-    cdef int xi_root, yi_root
+    cdef unsigned int xi_root, yi_root
 
     # these variables are used as pixel or neighbor indexes. where _q
     # represents a value out of a queue, and _n is related to a neighbor pixel
-    cdef int i_n, xi, yi, xi_q, yi_q, xi_n, yi_n
+    cdef unsigned int i_n, xi, yi, xi_q, yi_q, xi_n, yi_n
 
     # these are used to recall the local and neighbor heights of pixels
     cdef double root_height, n_height, dem_nodata, n_slope
@@ -1820,11 +1858,15 @@ def flow_dir_mfd(
     cdef queue[int] nodata_flow_dir_queue
 
     # properties of the parallel rasters
-    cdef int raster_x_size, raster_y_size
+    cdef unsigned long raster_x_size, raster_y_size
 
     # used for time-delayed logging
     cdef time_t last_log_time
     last_log_time = ctime(NULL)
+
+    # This is used in progress logging to represent how many pixels have been
+    # visited so far.
+    cdef unsigned long current_pixel
 
     # determine dem nodata in the working type, or set an improbable value
     # if one can't be determined
@@ -1888,11 +1930,11 @@ def flow_dir_mfd(
     # longest plateau drain distance possible for this raster.
     plateau_distance_path = os.path.join(
         working_dir_path, 'plateau_distance.tif')
-    plateau_distance_nodata = raster_x_size * raster_y_size
+    cdef unsigned long plateau_distance_nodata = raster_x_size * raster_y_size
     pygeoprocessing.new_raster_from_base(
         dem_raster_path_band[0], plateau_distance_path, gdal.GDT_Float64,
-        [plateau_distance_nodata], fill_value_list=[
-            raster_x_size * raster_y_size],
+        [plateau_distance_nodata],
+        fill_value_list=[plateau_distance_nodata],
         raster_driver_creation_tuple=raster_driver_creation_tuple)
     plateau_distance_managed_raster = _ManagedRaster(
         plateau_distance_path, 1, 1)
@@ -2214,7 +2256,7 @@ def flow_dir_mfd(
     dem_managed_raster.close()
     plateau_distance_managed_raster.close()
     shutil.rmtree(working_dir_path)
-    LOGGER.info('%.1f%% complete', 100.0)
+    LOGGER.info('Flow dir MFD %.1f%% complete', 100.0)
 
 
 def flow_accumulation_mfd(
@@ -2260,14 +2302,14 @@ def flow_accumulation_mfd(
     # data loss for any lower type that might be used in
     # `dem_raster_path_band[0]`.
     cdef numpy.ndarray[numpy.int32_t, ndim=2] flow_dir_mfd_buffer_array
-    cdef int win_ysize, win_xsize, xoff, yoff
+    cdef unsigned long win_ysize, win_xsize, xoff, yoff
 
     # These are used to estimate % complete
-    cdef long long visit_count, pixel_count
+    cdef unsigned long long visit_count, pixel_count
 
     # the _root variables remembers the pixel index where the plateau/pit
     # region was first detected when iterating over the DEM.
-    cdef int xi_root, yi_root
+    cdef unsigned long xi_root, yi_root
 
     # these variables are used as pixel or neighbor indexes.
     # _n is related to a neighbor pixel
@@ -2297,11 +2339,13 @@ def flow_accumulation_mfd(
     cdef FlowPixelType flow_pixel
 
     # properties of the parallel rasters
-    cdef int raster_x_size, raster_y_size
+    cdef unsigned long raster_x_size, raster_y_size
 
     # used for time-delayed logging
     cdef time_t last_log_time
     last_log_time = ctime(NULL)
+
+    cdef unsigned long current_pixel
 
     if not _is_raster_path_band_formatted(flow_dir_mfd_raster_path_band):
         raise ValueError(
@@ -2372,7 +2416,7 @@ def flow_accumulation_mfd(
         if ctime(NULL) - last_log_time > _LOGGING_PERIOD:
             last_log_time = ctime(NULL)
             current_pixel = xoff + yoff * raster_x_size
-            LOGGER.info('%.1f%% complete', 100.0 * current_pixel / <float>(
+            LOGGER.info('Flow accum MFD %.1f%% complete', 100.0 * current_pixel / <float>(
                 raster_x_size * raster_y_size))
 
         # make a buffer big enough to capture block and boundaries around it
@@ -2433,7 +2477,7 @@ def flow_accumulation_mfd(
                     if ctime(NULL) - last_log_time > _LOGGING_PERIOD:
                         last_log_time = ctime(NULL)
                         LOGGER.info(
-                            'mfd flow accum %.1f%% complete',
+                            'Flow accum MFD %.1f%% complete',
                             100.0 * visit_count / float(pixel_count))
 
                     preempted = 0
@@ -2495,7 +2539,7 @@ def flow_accumulation_mfd(
         shutil.rmtree(tmp_dir)
     except OSError:
         LOGGER.exception("couldn't remove temp dir")
-    LOGGER.info('%.1f%% complete', 100.0)
+    LOGGER.info('Flow accum MFD %.1f%% complete', 100.0)
 
 
 def distance_to_channel_d8(
@@ -2539,23 +2583,25 @@ def distance_to_channel_d8(
     # These variables are used to iterate over the DEM using `iterblock`
     # indexes
     cdef numpy.ndarray[numpy.uint8_t, ndim=2] channel_buffer_array
-    cdef int win_ysize, win_xsize, xoff, yoff
+    cdef unsigned int win_ysize, win_xsize, xoff, yoff
 
     # these variables are used as pixel or neighbor indexes.
     # _n is related to a neighbor pixel
-    cdef int i_n, xi, yi, xi_q, yi_q, xi_n, yi_n
+    cdef unsigned int i_n, xi, yi, xi_q, yi_q, xi_n, yi_n
 
     # `distance_to_channel_stack` is the datastructure that walks upstream
     # from a defined flow distance pixel
     cdef stack[PixelType] distance_to_channel_stack
 
     # properties of the parallel rasters
-    cdef int raster_x_size, raster_y_size
+    cdef unsigned int raster_x_size, raster_y_size
 
     # these area used to store custom per-pixel weights and per-pixel values
     # for distance updates
     cdef double weight_val, pixel_val
     cdef double weight_nodata = IMPROBABLE_FLOAT_NODATA
+
+    cdef unsigned long current_pixel
 
     # used for time-delayed logging
     cdef time_t last_log_time
@@ -2611,7 +2657,7 @@ def distance_to_channel_d8(
         if ctime(NULL) - last_log_time > _LOGGING_PERIOD:
             last_log_time = ctime(NULL)
             current_pixel = xoff + yoff * raster_x_size
-            LOGGER.info('%.1f%% complete', 100.0 * current_pixel / <float>(
+            LOGGER.info('Dist to channel D8 %.1f%% complete', 100.0 * current_pixel / <float>(
                 raster_x_size * raster_y_size))
 
         # make a buffer big enough to capture block and boundaries around it
@@ -2760,11 +2806,11 @@ def distance_to_channel_mfd(
     # indexes
     cdef numpy.ndarray[numpy.uint8_t, ndim=2] channel_buffer_array
     cdef numpy.ndarray[numpy.int32_t, ndim=2] flow_dir_buffer_array
-    cdef int win_ysize, win_xsize, xoff, yoff
+    cdef unsigned int win_ysize, win_xsize, xoff, yoff
 
     # these variables are used as pixel or neighbor indexes.
     # _n is related to a neighbor pixel
-    cdef int i_n, xi, yi, xi_n, yi_n
+    cdef unsigned int i_n, xi, yi, xi_n, yi_n
     cdef int flow_dir_weight, mfd_value
 
     # used to remember if the current pixel is a channel for routing
@@ -2775,7 +2821,7 @@ def distance_to_channel_mfd(
     cdef stack[MFDFlowPixelType] distance_to_channel_stack
 
     # properties of the parallel rasters
-    cdef int raster_x_size, raster_y_size
+    cdef unsigned int raster_x_size, raster_y_size
 
     # this value is used to store the current weight which might be 1 or
     # come from a predefined flow accumulation weight raster
@@ -2785,6 +2831,8 @@ def distance_to_channel_mfd(
     # used for time-delayed logging
     cdef time_t last_log_time
     last_log_time = ctime(NULL)
+
+    cdef unsigned long current_pixel
 
     for path in (
             flow_dir_mfd_raster_path_band, channel_raster_path_band,
@@ -2853,7 +2901,7 @@ def distance_to_channel_mfd(
         if ctime(NULL) - last_log_time > _LOGGING_PERIOD:
             last_log_time = ctime(NULL)
             current_pixel = xoff + yoff * raster_x_size
-            LOGGER.info('%.1f%% complete', 100.0 * current_pixel / <float>(
+            LOGGER.info('Dist to channel MFD %.1f%% complete', 100.0 * current_pixel / <float>(
                 raster_x_size * raster_y_size))
 
         # make a buffer big enough to capture block and boundaries around it
@@ -3008,7 +3056,7 @@ def distance_to_channel_mfd(
         weight_raster.close()
     visited_managed_raster.close()
     shutil.rmtree(tmp_work_dir)
-    LOGGER.info('%.1f%% complete', 100.0)
+    LOGGER.info('Dist to channel MFD %.1f%% complete', 100.0)
 
 
 def extract_streams_mfd(
@@ -3078,14 +3126,15 @@ def extract_streams_mfd(
     cdef _ManagedRaster flow_dir_mfd_mr = _ManagedRaster(
         flow_dir_mfd_path_band[0], flow_dir_mfd_path_band[1], 0)
 
-    cdef int xoff, yoff, win_xsize, win_ysize
-    cdef int xi, yi, xi_root, yi_root, i_n, xi_n, yi_n, i_sn, xi_sn, yi_sn
+    cdef unsigned int xoff, yoff, win_xsize, win_ysize
+    cdef unsigned int xi, yi, xi_root, yi_root, i_n, xi_n, yi_n, i_sn, xi_sn, yi_sn
     cdef int flow_dir_mfd
     cdef double flow_accum
     cdef double trace_flow_threshold = (
         trace_threshold_proportion * flow_threshold)
-    cdef int n_iterations = 0
+    cdef unsigned int n_iterations = 0
     cdef int is_outlet, stream_val
+    cdef unsigned long current_pixel
 
     cdef int flow_dir_nodata = pygeoprocessing.get_raster_info(
         flow_dir_mfd_path_band[0])['nodata'][flow_dir_mfd_path_band[1]-1]
@@ -3108,7 +3157,7 @@ def extract_streams_mfd(
             if ctime(NULL) - last_log_time > _LOGGING_PERIOD:
                 last_log_time = ctime(NULL)
                 current_pixel = xoff + yoff * raster_x_size
-                LOGGER.info('%.1f%% complete', 100.0 * current_pixel / <float>(
+                LOGGER.info('Extract streams MFD %.1f%% complete', 100.0 * current_pixel / <float>(
                     raster_x_size * raster_y_size))
             for xi in range(win_xsize):
                 xi_root = xi+xoff
@@ -3194,7 +3243,7 @@ def extract_streams_mfd(
                                         CoordinateType(xi_sn, yi_sn))
 
     stream_mr.close()
-    LOGGER.info('filter out incomplete divergent streams')
+    LOGGER.info('Extract streams MFD: filter out incomplete divergent streams')
     block_offsets_list = list(pygeoprocessing.iterblocks(
         (target_stream_raster_path, 1), offset_only=True))
     stream_raster = gdal.OpenEx(
@@ -3208,7 +3257,7 @@ def extract_streams_mfd(
             yoff=block_offsets['yoff'])
     stream_band = None
     stream_raster = None
-    LOGGER.info('100.0% complete')
+    LOGGER.info('Extract streams MFD: 100.0% complete')
 
 
 def _is_raster_path_band_formatted(raster_path_band):
@@ -3247,8 +3296,6 @@ def extract_strahler_streams_d8(
             from the upstream to downstream component of this stream
             segment.
         * "outlet" (int): 1 if this segment is an outlet, 0 if not.
-        * "river_id": unique ID among all stream segments which are
-            hydrologically connected.
         * "us_fa" (int): flow accumulation value at the upstream end of
             the stream segment.
         * "ds_fa" (int): flow accumulation value at the downstream end of
@@ -3341,36 +3388,39 @@ def extract_strahler_streams_d8(
     cdef int flow_nodata = pygeoprocessing.get_raster_info(
         flow_dir_d8_raster_path_band[0])['nodata'][
             flow_dir_d8_raster_path_band[1]-1]
+    cdef double flow_accum_nodata = pygeoprocessing.get_raster_info(
+        flow_accum_raster_path_band[0])['nodata'][
+        flow_accum_raster_path_band[1]-1]
 
     # D8 flow directions encoded as
     # 321
     # 4x0
     # 567
-    cdef int xoff, yoff, i, j, d, d_n, n_cols, n_rows
-    cdef int win_xsize, win_ysize
+    cdef unsigned int xoff, yoff, i, j, d, d_n, n_cols, n_rows
+    cdef unsigned int win_xsize, win_ysize
 
     n_cols, n_rows = flow_dir_info['raster_size']
 
     LOGGER.info('(extract_strahler_streams_d8): seed the drains')
-    cdef long n_pixels = n_cols * n_rows
+    cdef unsigned long n_pixels = n_cols * n_rows
     cdef long n_processed = 0
     cdef time_t last_log_time
     last_log_time = ctime(NULL)
     cdef stack[StreamConnectivityPoint] source_point_stack
     cdef StreamConnectivityPoint source_stream_point
 
-    cdef int x_l=-1, y_l=-1  # the _l is for "local" aka "current" pixel
+    cdef unsigned int x_l=-1, y_l=-1  # the _l is for "local" aka "current" pixel
 
     # D8 backflow directions encoded as
     # 765
     # 0x4
     # 123
-    cdef int x_n, y_n  # the _n is for "neighbor"
-    cdef int upstream_count=0, upstream_index
+    cdef unsigned int x_n, y_n  # the _n is for "neighbor"
+    cdef unsigned int upstream_count=0, upstream_index
     # this array is filled out as upstream directions are calculated and
     # indexed by `upstream_count`
     cdef int *upstream_dirs = [0, 0, 0, 0, 0, 0, 0, 0]
-    cdef long local_flow_accum
+    cdef double local_flow_accum
     # used to determine if source is a drain and should be tracked
     cdef int is_drain
 
@@ -3404,16 +3454,17 @@ def extract_strahler_streams_d8(
                 is_drain = 0
                 x_l = xoff + i
                 y_l = yoff + j
-                local_flow_accum = <long>flow_accum_managed_raster.get(
+                local_flow_accum = <double>flow_accum_managed_raster.get(
                     x_l, y_l)
-                if local_flow_accum < min_flow_accum_threshold:
+                if (local_flow_accum < min_flow_accum_threshold or
+                        _is_close(local_flow_accum,
+                                  flow_accum_nodata, 1e-8, 1e-5)):
                     continue
                 # check to see if it's a drain
                 d_n = <int>flow_dir_managed_raster.get(x_l, y_l)
                 x_n = x_l + D8_XOFFSET[d_n]
                 y_n = y_l + D8_YOFFSET[d_n]
-
-                if (x_n < 0 or y_n < 0 or x_n >= n_cols or y_n >= n_cols or
+                if (x_n < 0 or y_n < 0 or x_n >= n_cols or y_n >= n_rows or
                         <int>flow_dir_managed_raster.get(
                             x_n, y_n) == flow_nodata):
                     is_drain = 1
@@ -3435,7 +3486,7 @@ def extract_strahler_streams_d8(
                     if d_n == flow_nodata:
                         continue
                     if (D8_REVERSE_DIRECTION[d] == d_n and
-                            <long>flow_accum_managed_raster.get(
+                            <double>flow_accum_managed_raster.get(
                                 x_n, y_n) >= min_flow_accum_threshold):
                         upstream_dirs[upstream_count] = d
                         upstream_count += 1
@@ -3484,6 +3535,10 @@ def extract_strahler_streams_d8(
             flow_accum_managed_raster, flow_dir_managed_raster, flow_nodata,
             min_flow_accum_threshold, coord_to_stream_ids)
         if payload is None:
+            LOGGER.debug(
+                f'no geometry for source point at '
+                f'{source_stream_point.xi}, {source_stream_point.yi} '
+                f'upstream direction: {source_stream_point.upstream_d8_dir}')
             continue
         x_u, y_u, ds_x_1, ds_y_1, upstream_id_list, stream_line = payload
 
@@ -4100,7 +4155,7 @@ def calculate_subwatershed_boundary(
         discovery_time_raster_path)
     cdef long discovery_nodata = discovery_info['nodata'][0]
 
-    cdef int n_cols, n_rows
+    cdef unsigned int n_cols, n_rows
     n_cols, n_rows = discovery_info['raster_size']
 
     geotransform = discovery_info['geotransform']
@@ -4132,7 +4187,8 @@ def calculate_subwatershed_boundary(
     watershed_layer.CreateField(ogr.FieldDefn('outlet_y', ogr.OFTInteger))
     watershed_layer.StartTransaction()
 
-    cdef int x_l, y_l, outflow_dir
+    cdef unsigned int x_l, y_l
+    cdef int outflow_dir
     cdef double x_f, y_f
     cdef double x_p, y_p
     cdef long discovery, finish
@@ -4518,8 +4574,8 @@ def detect_outlets(
             f'{flow_dir_type}')
     cdef int d8_flow_dir_mode = (flow_dir_type == 'd8')
 
-    cdef int xoff, yoff, win_xsize, win_ysize, xi, yi
-    cdef int xi_root, yi_root, raster_x_size, raster_y_size
+    cdef unsigned int xoff, yoff, win_xsize, win_ysize, xi, yi
+    cdef unsigned int xi_root, yi_root, raster_x_size, raster_y_size
     cdef int flow_dir, flow_dir_n
     cdef int next_id=0, n_dir, is_outlet
     cdef char x_off_border, y_off_border, win_xsize_border, win_ysize_border
@@ -4920,7 +4976,7 @@ cdef _calculate_stream_geometry(
 def _delete_feature(
         stream_feature, stream_layer, upstream_to_downstream_id,
         downstream_to_upstream_ids):
-    """Helper for Mahler extraction to delete all references to a stream.
+    """Helper for Strahler extraction to delete all references to a stream.
 
     Args:
         stream_feature (ogr.Feature): feature to delete
