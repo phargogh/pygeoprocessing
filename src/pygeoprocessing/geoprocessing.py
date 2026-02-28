@@ -37,7 +37,8 @@ from .geoprocessing_core import DEFAULT_CREATION_OPTIONS
 from .geoprocessing_core import DEFAULT_GTIFF_CREATION_TUPLE_OPTIONS
 from .geoprocessing_core import DEFAULT_OSR_AXIS_MAPPING_STRATEGY
 from .geoprocessing_core import INT8_CREATION_OPTIONS
-from .utils import GDALUseExceptions, gdal_use_exceptions
+from .utils import gdal_use_exceptions
+from .utils import GDALUseExceptions
 
 # This is used to efficiently pass data to the raster stats worker if available
 if sys.version_info >= (3, 8):
@@ -71,11 +72,37 @@ LOGGER = logging.getLogger(__name__)
 # Used in joining finished TaskGraph Tasks.
 _MAX_TIMEOUT = 60.0
 
+_VALID_GDAL_TYPENAMES = (
+    set([name for name in dir(gdal.gdalconst) if name.startswith('GDT_')]))
 _VALID_GDAL_TYPES = (
-    set([getattr(gdal, x) for x in dir(gdal.gdalconst) if 'GDT_' in x]))
+    set([getattr(gdal, n) for n in _VALID_GDAL_TYPENAMES]))
 
 _LOGGING_PERIOD = 5.0  # min 5.0 seconds per update log message for the module
 _LARGEST_ITERBLOCK = 2**16  # largest block for iterblocks to read in cells
+
+
+def _to_gdal_type(input_type):
+    # input type is a GDAL type or a numpy type
+    # If the user-provided type is known to be a GDAL type, use it.
+    if input_type in _VALID_GDAL_TYPES:
+        return input_type
+
+    assert issubclass(input_type, numpy.number)  # sanity check
+
+    input_dtypename = numpy.dtype(input_type).name
+    for gdal_attrname in _VALID_GDAL_TYPENAMES:
+        gdal_typename = re.sub('^GDT_', '', gdal_attrname).lower()
+        if gdal_typename == input_dtypename:
+            return getattr(gdal, gdal_attrname)
+
+    special_case_types = {
+        numpy.uint8: gdal.GDT_Byte,
+    }
+    try:
+        return special_case_types[input_type]
+    except KeyError:
+        raise ValueError(f"Numpy type {input_dtypename} has no GDAL equivalent.")
+
 
 class TimedLoggingAdapter(logging.LoggerAdapter):
     """A logging adapter to restrict logging based on a timer.

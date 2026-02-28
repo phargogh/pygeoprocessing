@@ -32,10 +32,10 @@ from osgeo import osr
 from pygeoprocessing.geoprocessing_core import DEFAULT_CREATION_OPTIONS
 from pygeoprocessing.geoprocessing_core import \
     DEFAULT_GTIFF_CREATION_TUPLE_OPTIONS
-from pygeoprocessing.utils import gdal_use_exceptions
 from pygeoprocessing.geoprocessing_core import INT8_CREATION_OPTIONS
 from pygeoprocessing.geoprocessing_core import \
     INT8_GTIFF_CREATION_TUPLE_OPTIONS
+from pygeoprocessing.utils import gdal_use_exceptions
 
 _DEFAULT_ORIGIN = (444720, 3751320)
 _DEFAULT_PIXEL_SIZE = (30, -30)
@@ -5927,3 +5927,24 @@ class TestGeoprocessing(unittest.TestCase):
                 [500000, -50, 0, 5000000, 0, 50],
                 [499999, 5000001, 499999, 5000001]),
             [499950, 5000000, 500000, 5000050])
+
+    def test_to_gdal_type(self):
+        for numpy_type, corresponding_gdal_type in [
+                (numpy.float32, gdal.GDT_Float32),
+                (numpy.float16, gdal.GDT_Float16),
+                (numpy.float64, gdal.GDT_Float64),
+                (numpy.int16, gdal.GDT_Int16),
+                (numpy.byte, gdal.GDT_Int8),
+                (numpy.int8, gdal.GDT_Int8),
+                (numpy.uint8, gdal.GDT_Byte),
+                (numpy.uint16, gdal.GDT_UInt16),
+                (numpy.uint32, gdal.GDT_UInt32),
+                (numpy.uint64, gdal.GDT_UInt64),
+                ]:
+            print(numpy_type, corresponding_gdal_type)
+            self.assertEqual(
+                pygeoprocessing.geoprocessing._to_gdal_type(numpy_type),
+                corresponding_gdal_type)
+            self.assertEqual(
+                pygeoprocessing.geoprocessing._to_gdal_type(corresponding_gdal_type),
+                corresponding_gdal_type)
