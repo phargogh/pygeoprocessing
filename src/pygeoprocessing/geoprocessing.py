@@ -80,13 +80,48 @@ _VALID_GDAL_TYPES = (
 _LOGGING_PERIOD = 5.0  # min 5.0 seconds per update log message for the module
 _LARGEST_ITERBLOCK = 2**16  # largest block for iterblocks to read in cells
 
+_IGNORED_NUMPY_TYPES = set([
+    numpy.longdouble,
+    numpy.cdouble,
+    numpy.clongdouble,
+    numpy.datetime,
+    numpy.timedelta,
+    numpy.object_,
+    numpy.bytes_,
+    numpy.str_,
+    numpy.void,
+    numpy.intp,
+    numpy.uintp,
+])
 NUMPY_TO_GDAL_TYPES = {
     numpy.byte: gdal.GDT_Int8,
+    numpy.ubyte: gdal.GDT_Byte,
+    numpy.ushort: gdal.GDT_UInt16,
+    numpy.uintc: gdal.GDT_UInt32,
+    numpy.uint: gdal.GDT_UInt64,
+    numpy.ulong: gdal.GDT_UInt64,
+    numpy.half: gdal.GDT_Float16,
+    numpy.single: gdal.GDT_Float32,
+    numpy.double: gdal.GDT_Float64,
+    # numpy.longdouble has no GDAL equivalent
+    numpy.csingle: gdal.GDT_CFloat64,
+    # numpy.cdouble would equal gdal.CFloat128, which DNE
+    # numpy.clongdouble would equal gdal.CFloat256, which DNE
+    numpy.bool: gdal.GDT_Byte,
+    # numpy.datetime has no GDAL equivalent
+    # numpy.timedelta has no direct GDAL equivalent
+    # numpy.object_ has no GDAL equivalent
+    # numpy.bytes_ has no GDAL equivalent
+    # numpy.str_ has no GDAL equivalent
+    # numpy.void has no generic GDAL equivalent
+    # numpy.intp, numpy.uintp should be aliases for existing numpy integer
+    # types and already represented in this mapping.
     numpy.float16: gdal.GDT_Float16,
     numpy.float32: gdal.GDT_Float32,
     numpy.float64: gdal.GDT_Float64,
     # GDAL has CInt types for complex ints, but these don't exist in numpy
     # GDAL has additional complex float types, but these don't exist in numpy
+    # TODO: confirm how GDAL's complex float types map to numpy types
     numpy.complex64: gdal.GDT_CFloat64,
     numpy.int8: gdal.GDT_Int8,
     numpy.int16: gdal.GDT_Int16,
@@ -97,6 +132,8 @@ NUMPY_TO_GDAL_TYPES = {
     numpy.uint32: gdal.GDT_UInt32,
     numpy.uint64: gdal.GDT_UInt64,
 }
+# TODO: warn if there are numpy types not accounted for or not expressly
+# ignored
 
 
 def _to_gdal_type(input_type):
