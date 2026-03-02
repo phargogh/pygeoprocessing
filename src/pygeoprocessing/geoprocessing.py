@@ -80,28 +80,53 @@ _VALID_GDAL_TYPES = (
 _LOGGING_PERIOD = 5.0  # min 5.0 seconds per update log message for the module
 _LARGEST_ITERBLOCK = 2**16  # largest block for iterblocks to read in cells
 
+NUMPY_TO_GDAL_TYPES = {
+    numpy.byte: gdal.GDT_Int8,
+    numpy.float16: gdal.GDT_Float16,
+    numpy.float32: gdal.GDT_Float32,
+    numpy.float64: gdal.GDT_Float64,
+    # GDAL has CInt types for complex ints, but these don't exist in numpy
+    # GDAL has additional complex float types, but these don't exist in numpy
+    numpy.complex64: gdal.GDT_CFloat64,
+    numpy.int8: gdal.GDT_Int8,
+    numpy.int16: gdal.GDT_Int16,
+    numpy.int32: gdal.GDT_Int32,
+    numpy.int64: gdal.GDT_Int64,
+    numpy.uint8: gdal.GDT_Byte,
+    numpy.uint16: gdal.GDT_UInt16,
+    numpy.uint32: gdal.GDT_UInt32,
+    numpy.uint64: gdal.GDT_UInt64,
+}
+
 
 def _to_gdal_type(input_type):
-    # input type is a GDAL type or a numpy type
+    """Convert a provided type to a GDAL datatype.
+
+    Args:
+        input_type (int or numpy type): A datatype representing a raster.
+            Could be either a GDAL type (e.g. ``gdal.GDT_Float32``) or a numpy
+            dtype (e.g. ``numpy.float32``).
+
+    Returns:
+        The equivalent GDAL datatype of the datatype provided.
+
+    Raises:
+        ``ValueError`` when the numpy type provided cannot be converted to a
+        GDAL type.
+    """
     # If the user-provided type is known to be a GDAL type, use it.
     if input_type in _VALID_GDAL_TYPES:
         return input_type
 
-    assert issubclass(input_type, numpy.number)  # sanity check
-
-    input_dtypename = numpy.dtype(input_type).name
-    for gdal_attrname in _VALID_GDAL_TYPENAMES:
-        gdal_typename = re.sub('^GDT_', '', gdal_attrname).lower()
-        if gdal_typename == input_dtypename:
-            return getattr(gdal, gdal_attrname)
-
-    special_case_types = {
-        numpy.uint8: gdal.GDT_Byte,
-    }
     try:
-        return special_case_types[input_type]
+        return NUMPY_TO_GDAL_TYPES[input_type]
     except KeyError:
-        raise ValueError(f"Numpy type {input_dtypename} has no GDAL equivalent.")
+        raise ValueError(
+            f"Numpy type {numpy.dtype(input_type).name} has no known "
+            "GDAL equivalent. If one does exist, you can use the gdal.GDT_* "
+            "type directly instead of a numpy type, and please let us know "
+            "at https://github.com/natcap/pygeoprocessing/issues"
+        )
 
 
 class TimedLoggingAdapter(logging.LoggerAdapter):
