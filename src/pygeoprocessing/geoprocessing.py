@@ -81,17 +81,19 @@ _LOGGING_PERIOD = 5.0  # min 5.0 seconds per update log message for the module
 _LARGEST_ITERBLOCK = 2**16  # largest block for iterblocks to read in cells
 
 _IGNORED_NUMPY_TYPES = set([
-    numpy.longdouble,
-    numpy.cdouble,
-    numpy.clongdouble,
-    numpy.datetime,
-    numpy.timedelta,
-    numpy.object_,
-    numpy.bytes_,
-    numpy.str_,
-    numpy.void,
-    numpy.intp,
-    numpy.uintp,
+    "longdouble",
+    "cdouble",
+    "clongdouble",
+    "datetime",
+    "datetime64",
+    "timedelta",
+    "timedelta64",
+    "object_",
+    "bytes_",
+    "str_",
+    "void",
+    "intp",
+    "uintp",
 ])
 NUMPY_TO_GDAL_TYPES = {
     numpy.byte: gdal.GDT_Int8,
@@ -116,7 +118,7 @@ NUMPY_TO_GDAL_TYPES = {
     # numpy.void has no generic GDAL equivalent
     # numpy.intp, numpy.uintp should be aliases for existing numpy integer
     # types and already represented in this mapping.
-    numpy.float16: gdal.GDT_Float16,
+    #numpy.float16: gdal.GDT_Float16,
     numpy.float32: gdal.GDT_Float32,
     numpy.float64: gdal.GDT_Float64,
     # GDAL has CInt types for complex ints, but these don't exist in numpy
@@ -132,8 +134,34 @@ NUMPY_TO_GDAL_TYPES = {
     numpy.uint32: gdal.GDT_UInt32,
     numpy.uint64: gdal.GDT_UInt64,
 }
-# TODO: warn if there are numpy types not accounted for or not expressly
-# ignored
+
+def _check_numpy_types():
+    missing_types = []
+    for attrname in dir(numpy):
+        attrobj = getattr(numpy, attrname)
+
+        # Skip attributes that aren't numeric
+        if not issubclass(type(attrobj), numpy.number):
+            continue
+
+        # The attribute is a known type.
+        if attrobj in NUMPY_TO_GDAL_TYPES:
+            continue
+
+        # We already know of this type and decided it should be ignored.
+        if attrname in _IGNORED_NUMPY_TYPES:
+            continue
+
+        # If we make it here, pygeoprocessing's type list might need updating.
+        missing_types.append(attrname)
+
+    if missing_types:
+        warnings.warn(
+            "Pygeoprocessing is missing these numpy types: "
+            f"{sorted(missing_types)}.  To use these types, be sure to use "
+            "the corresponding GDAL types.")
+
+_check_numpy_types()
 
 
 def _to_gdal_type(input_type):
