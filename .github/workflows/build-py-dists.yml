@@ -48,6 +48,7 @@ jobs:
                   gdal==${{ env.GDAL_VERSION_FOR_WHEEL_BUILD }}
                   setuptools
                   python-build
+                  wheel
                 environment-name: env
 
             - name: Build wheel
