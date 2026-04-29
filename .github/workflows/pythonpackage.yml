@@ -64,4 +64,9 @@ jobs:
             python -m pip install $(find dist -name "*.whl")
 
       - name: Test with pytest
-        run: python -m pytest tests
+        run: |
+          valgrind --leak-check=full \
+            --show-leak-kinds=all \
+            --track-origins=yes \
+            --verbose \
+            python -m pytest tests
