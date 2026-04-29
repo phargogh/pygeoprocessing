@@ -54,6 +54,8 @@ jobs:
             - name: Build wheel
               run: PYGEOPROCESSING_GDAL_LIB_PATH="$CONDA_PREFIX/Library" python -m build --wheel
 
+            # Modify the wheel metadata to require the same minor version of gdal that we built against
+            # This should prevent libgdal version conflicts
             - name: Modify wheel to add gdal constraint
               run: |
                 wheel unpack dist/*.whl --dest tmp
