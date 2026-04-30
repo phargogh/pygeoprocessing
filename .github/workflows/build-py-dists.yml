@@ -15,6 +15,9 @@ defaults:
   run:
     shell: bash -l {0}
 
+env:
+  GDAL_VERSION_FOR_WHEEL_BUILD: "3.10.*"
+
 jobs:
     build-wheels:
         name: Wheel
@@ -42,13 +45,23 @@ jobs:
                     - conda-forge
                 create-args: >-
                   python=${{ matrix.python-version }}
-                  gdal
+                  gdal==${{ env.GDAL_VERSION_FOR_WHEEL_BUILD }}
                   setuptools
                   python-build
+                  wheel
                 environment-name: env
 
             - name: Build wheel
               run: PYGEOPROCESSING_GDAL_LIB_PATH="$CONDA_PREFIX/Library" python -m build --wheel
+
+            # Modify the wheel metadata to require the same minor version of gdal that we built against
+            # This should prevent libgdal version conflicts
+            - name: Modify wheel to add gdal constraint
+              run: |
+                wheel unpack dist/*.whl --dest tmp
+                sed -i.bak 's/Requires-Dist: gdal.*/Requires-Dist: gdal==${{ env.GDAL_VERSION_FOR_WHEEL_BUILD }}/I' tmp/*/*.dist-info/METADATA
+                rm tmp/*/*.dist-info/*.bak
+                wheel pack tmp/* --dest-dir dist
 
             - uses: actions/upload-artifact@v4
               with:
