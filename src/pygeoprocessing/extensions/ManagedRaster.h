@@ -379,7 +379,7 @@ class ManagedRaster {
       GDALClose( (GDALDatasetH) dataset );
       delete lru_cache;
       free(actualBlockWidths);
-      // free(geotransform);
+      free(geotransform);
     }
 };
 
@@ -517,11 +517,11 @@ public:
     i++;
   }
 
-  // ~NeighborIterator() {
-  //   if (this->m_ptr != &endVal) {
-  //     delete this->m_ptr;
-  //   }
-  // }
+  ~NeighborIterator() {
+    if (this->m_ptr != &endVal) {
+      delete this->m_ptr;
+    }
+  }
 };
 
 // Iterates over neighbor pixels that are downslope of a given pixel,
