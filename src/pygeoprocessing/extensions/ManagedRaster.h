@@ -506,6 +506,8 @@ public:
   // Increments the pointer to the next neighbor
   virtual void next() {
     long xj, yj, flow;
+    delete this->m_ptr;
+    this->m_ptr = nullptr;
     if (i == 8) {
       m_ptr = &endVal;
       return;
