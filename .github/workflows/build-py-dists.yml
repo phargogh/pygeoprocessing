@@ -43,12 +43,14 @@ jobs:
                 create-args: >-
                   python=${{ matrix.python-version }}
                   gdal
+                  libtiff
+                  pkg-config
                   setuptools
                   python-build
                 environment-name: env
 
             - name: Build wheel
-              run: PYGEOPROCESSING_GDAL_LIB_PATH="$CONDA_PREFIX/Library" python -m build --wheel
+              run: PYGEOPROCESSING_TIFF_LIB_PATH="$CONDA_PREFIX/Library" python -m build --wheel
 
             - uses: actions/upload-artifact@v4
               with:
@@ -76,6 +78,8 @@ jobs:
                 create-args: >-
                   python=3.13
                   gdal
+                  libtiff
+                  pkg-config
                   setuptools
                   python-build
                 environment-name: env
