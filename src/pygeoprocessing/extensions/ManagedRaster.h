@@ -15,44 +15,6 @@
 
 #include "LRUCache.h"
 
-#ifndef TIFFTAG_GDAL_NODATA
-#define TIFFTAG_GDAL_NODATA 42113
-#endif
-
-static const TIFFFieldInfo GEOTIFF_FIELD_INFO[] = {
-  {33550, TIFF_VARIABLE2, TIFF_VARIABLE2, TIFF_DOUBLE, FIELD_CUSTOM, 1, 1,
-    (char*) "ModelPixelScaleTag"},
-  {33922, TIFF_VARIABLE2, TIFF_VARIABLE2, TIFF_DOUBLE, FIELD_CUSTOM, 1, 1,
-    (char*) "ModelTiepointTag"},
-  {34735, TIFF_VARIABLE2, TIFF_VARIABLE2, TIFF_SHORT, FIELD_CUSTOM, 1, 1,
-    (char*) "GeoKeyDirectoryTag"},
-  {34736, TIFF_VARIABLE2, TIFF_VARIABLE2, TIFF_DOUBLE, FIELD_CUSTOM, 1, 1,
-    (char*) "GeoDoubleParamsTag"},
-  {34737, TIFF_VARIABLE, TIFF_VARIABLE, TIFF_ASCII, FIELD_CUSTOM, 1, 0,
-    (char*) "GeoAsciiParamsTag"},
-  {TIFFTAG_GDAL_NODATA, TIFF_VARIABLE, TIFF_VARIABLE, TIFF_ASCII,
-    FIELD_CUSTOM, 1, 0, (char*) "GDALNoDataValue"},
-};
-
-static TIFFExtendProc PARENT_TIFF_TAG_EXTENDER = NULL;
-
-static void geotiff_tag_extender(TIFF* tif) {
-  TIFFMergeFieldInfo(
-    tif, GEOTIFF_FIELD_INFO,
-    sizeof(GEOTIFF_FIELD_INFO) / sizeof(GEOTIFF_FIELD_INFO[0]));
-  if (PARENT_TIFF_TAG_EXTENDER != NULL) {
-    (*PARENT_TIFF_TAG_EXTENDER)(tif);
-  }
-}
-
-static void ensure_geotiff_tags_registered() {
-  static bool registered = false;
-  if (!registered) {
-    PARENT_TIFF_TAG_EXTENDER = TIFFSetTagExtender(geotiff_tag_extender);
-    registered = true;
-  }
-}
-
 int MANAGED_RASTER_N_BLOCKS = static_cast<int>(pow(2, 6));
 // given the pixel neighbor numbering system
 //  3 2 1
@@ -179,7 +141,6 @@ class ManagedRaster {
       , band_id { band_id }
       , write_mode { write_mode }
     {
-      ensure_geotiff_tags_registered();
       dataset = TIFFOpen(raster_path, write_mode ? "r+" : "r");
       if (dataset == nullptr) {
         throw std::invalid_argument(
