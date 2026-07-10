@@ -823,6 +823,10 @@ def align_and_resize_raster_stack(
     clipping or resizing the rasters to intersected, unioned, or equivocated
     bounding boxes of all the raster and vector input.
 
+    Note: If any bands in rasters in ``base_raster_path_list`` do not have a
+    defined NoData value, a suitable value will be chosen for all bands in
+    that raster based on its datatype.
+
     Args:
         base_raster_path_list (sequence): a sequence of base raster paths that
             will be transformed and will be used to determine the target
@@ -2485,6 +2489,10 @@ def warp_raster(
         osr_axis_mapping_strategy=DEFAULT_OSR_AXIS_MAPPING_STRATEGY):
     """Resize/resample raster to desired pixel size, bbox and projection.
 
+    Note: If any band in ``base_raster_path`` does not have a defined NoData
+    value, a suitable value will be chosen for all bands based on the
+    raster's datatype.
+
     Args:
         base_raster_path (string): path to base raster. Paths may use any
             GDAL-supported scheme, including virtual file system /vsi schemes.
@@ -2583,7 +2591,16 @@ def warp_raster(
     base_raster_info = get_raster_info(base_raster_path)
     if target_projection_wkt is None:
         target_projection_wkt = base_raster_info['projection_wkt']
-
+    if None in base_raster_info['nodata']:
+        pgp_nodata = choose_nodata(base_raster_info['numpy_type'])
+        tgt_nodata = " ".join(
+            str(pgp_nodata) for x in range(len(base_raster_info['nodata'])))
+        LOGGER.warning(f'One or more bands in {base_raster_path} do not have '
+                       'a designated NoData value. All bands in the output '
+                       'warped raster will be assigned a NoData value '
+                       f'of {tgt_nodata}.')
+    else:
+        tgt_nodata = " ".join(str(x) for x in base_raster_info['nodata'])
     if vector_mask_options is not None:
         warnings.warn('The vector_mask_options parameter is deprecated and '
                       'will be removed in a future release of '
@@ -2696,6 +2713,7 @@ def warp_raster(
         outputBoundsSRS=target_projection_wkt,
         srcSRS=base_projection_wkt,
         dstSRS=target_projection_wkt,
+        dstNodata=tgt_nodata,
         multithread=True if warp_options else False,
         warpOptions=warp_options,
         overviewLevel=use_overview_level,

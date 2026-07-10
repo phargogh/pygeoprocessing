@@ -2147,6 +2147,60 @@ class TestGeoprocessing(unittest.TestCase):
             target_raster_path)
         numpy.testing.assert_allclose(target_array, expected_matrix)
 
+    def test_warp_raster_mixed_nodata_warns(self):
+        """Test warning if 1 band in multiband raster has no defined nodata.
+
+        Test that a warning is raised if a multiband raster with one band
+        that has a defined nodata value and one band that does not have a
+        defined nodata value is passed to warp_raster. Test output has
+        auto-defined NoData, not input NoData.
+        """
+
+        raster_path = os.path.join(self.workspace_dir, 'multi.tif')
+        driver = gdal.GetDriverByName('GTiff')
+        raster = driver.Create(raster_path, 4, 4, 2, gdal.GDT_Int16)
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(26910)
+        raster.SetProjection(srs.ExportToWkt())
+        raster.SetGeoTransform((0, 10, 0, 0, 0, -10))
+        arr = numpy.arange(16).reshape(4, 4)
+        arr[0, 0] = -9999
+        band1 = raster.GetRasterBand(1)
+        band2 = raster.GetRasterBand(2)
+        band1.WriteArray(arr)
+        band2.WriteArray(arr)
+        raster = None
+
+        vrt_path = os.path.join(self.workspace_dir, 'multi.vrt')
+        gdal.BuildVRT(vrt_path, [raster_path])
+        vrt = gdal.Open(vrt_path, gdal.GA_Update)
+        vrt.GetRasterBand(2).SetNoDataValue(-9999)
+        # leave band 1 without nodata
+        vrt = None
+
+        output_raster_path = os.path.join(self.workspace_dir, 'out.tif')
+        with self.assertLogs(level='WARNING') as cm:
+            pygeoprocessing.warp_raster(vrt_path, (10, -10),
+                                        output_raster_path, 'near')
+
+        self.assertTrue(
+            any("One or more bands"
+                in msg for msg in cm.output),
+            f"Expected warning not found in logs: {cm.output}")
+
+        # check that first pixel in band 1 is still -9999 (because that band
+        # had no defined NoData)
+        actual_array = pygeoprocessing.raster_to_numpy_array(
+            output_raster_path)
+        numpy.testing.assert_allclose(actual_array, arr)
+
+        # check that first pixel in band 2 was converted to appropriate Nodata
+        # value for a int16 raster
+        arr[0, 0] = 32767
+        actual_array = pygeoprocessing.raster_to_numpy_array(
+            output_raster_path, 2)
+        numpy.testing.assert_allclose(actual_array, arr)
+
     def test_align_and_resize_raster_stack_bad_values(self):
         """PGP.geoprocessing: align/resize raster bad base values."""
         pixel_a_matrix = numpy.ones((5, 5), numpy.int16)
@@ -2584,6 +2638,34 @@ class TestGeoprocessing(unittest.TestCase):
             target_raster_path_list[0])
         numpy.testing.assert_array_equal(
             numpy.ones((4, 4), pixel_a_matrix.dtype), target_array)
+
+    def test_align_and_resize_raster_stack_no_set_nodata_multiband(self):
+        """Test align_and_resize sets nodata if not defined for input."""
+        arr = numpy.arange(16).reshape(4, 4)
+
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(26910)
+        input_raster_path = os.path.join(self.workspace_dir, 'test.tif')
+        pygeoprocessing.numpy_array_to_raster(
+            arr.astype(numpy.int16), target_nodata=None,
+            pixel_size=(10, -10), origin=(0, 0),
+            projection_wkt=srs.ExportToWkt(),
+            target_path=input_raster_path)
+
+        output_raster_path = os.path.join(self.workspace_dir, 'test_align.tif')
+        pygeoprocessing.align_and_resize_raster_stack(
+            [input_raster_path],
+            [output_raster_path],
+            ['near'],
+            (10, -10),
+            [-10, -20, 20, 0])
+            # this target bounding box extends beyond extent of input raster
+            # (input raster's bbox is [0, -40, 40, 0])
+
+        output_array = pygeoprocessing.raster_to_numpy_array(
+            output_raster_path)
+        expected_output_array = numpy.array([[32767, 0, 1], [32767, 4, 5]])
+        numpy.testing.assert_allclose(output_array, expected_output_array)
 
     def test_raster_calculator(self):
         """PGP.geoprocessing: raster_calculator identity test."""

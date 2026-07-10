@@ -3,10 +3,21 @@ Release History
 
 Unreleased Changes
 ------------------
+* ``warp_raster`` will now automatically assign an appropriate NoData value
+  to any input raster without one defined. This fixes a bug where
+  ``align_and_resize_raster_stack`` would pad rasters that were smaller
+  than the target extent and didn't have a defined NoData value with 0s.
+  https://github.com/natcap/pygeoprocessing/issues/476
+
+2.4.11 (2026-04-10)
+-------------------
 * The Natural Capital Project changed its name to the Natural Capital Alliance.
   References to the old name and website domain have been updated to reflect
   this change.
   https://github.com/natcap/pygeoprocessing/issues/458
+* Fixing a build issue with readthedocs builds due to the deprecation of
+  ``pkg_resources``.
+  https://github.com/natcap/pygeoprocessing/issues/469
 * The average value of valid pixels is now computed in
   ``pygeoprocessing.zonal_statistics`` for each feature.
   https://github.com/natcap/pygeoprocessing/issues/370
