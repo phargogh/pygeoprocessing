@@ -4,6 +4,7 @@
 #include "tiffio.h"
 #include <Python.h>
 
+#include <cstdarg>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -14,6 +15,34 @@
 #include <string>
 
 #include "LRUCache.h"
+
+static TIFFErrorHandler PARENT_TIFF_WARNING_HANDLER = NULL;
+
+static void managed_raster_tiff_warning_handler(
+    const char* module, const char* fmt, va_list ap) {
+  char message[512];
+  va_list ap_copy;
+  va_copy(ap_copy, ap);
+  vsnprintf(message, sizeof(message), fmt, ap_copy);
+  va_end(ap_copy);
+
+  if (strstr(message, "Unknown field with tag") != NULL) {
+    return;
+  }
+
+  if (PARENT_TIFF_WARNING_HANDLER != NULL) {
+    (*PARENT_TIFF_WARNING_HANDLER)(module, fmt, ap);
+  }
+}
+
+static void ensure_tiff_warning_handler_registered() {
+  static bool registered = false;
+  if (!registered) {
+    PARENT_TIFF_WARNING_HANDLER = TIFFSetWarningHandler(
+      managed_raster_tiff_warning_handler);
+    registered = true;
+  }
+}
 
 int MANAGED_RASTER_N_BLOCKS = static_cast<int>(pow(2, 6));
 // given the pixel neighbor numbering system
@@ -141,6 +170,7 @@ class ManagedRaster {
       , band_id { band_id }
       , write_mode { write_mode }
     {
+      ensure_tiff_warning_handler_registered();
       dataset = TIFFOpen(raster_path, write_mode ? "r+" : "r");
       if (dataset == nullptr) {
         throw std::invalid_argument(
