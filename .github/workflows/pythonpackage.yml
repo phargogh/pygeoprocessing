@@ -32,7 +32,7 @@ jobs:
           fetch-depth: 0
 
       - name: setup-micromamba
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v3
         with:
           # Grab requirements from pip-compatible requirements.txt
           environment-file: requirements.txt

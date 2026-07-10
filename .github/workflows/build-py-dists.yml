@@ -35,7 +35,7 @@ jobs:
         run: git fetch origin +refs/tags/*:refs/tags/*
 
       - name: setup-micromamba
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v3
         with:
           condarc: |
             channels:
@@ -70,7 +70,7 @@ jobs:
         run: git fetch origin +refs/tags/*:refs/tags/*
 
       - name: setup-micromamba
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v3
         with:
           condarc: |
             channels:
