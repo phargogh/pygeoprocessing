@@ -6102,3 +6102,14 @@ class TestGeoprocessing(unittest.TestCase):
                 [500000, -50, 0, 5000000, 0, 50],
                 [499999, 5000001, 499999, 5000001]),
             [499950, 5000000, 500000, 5000050])
+
+    def test_get_include(self):
+        """PGP: test get_include()."""
+        # Check the value is what we expect
+        self.assertEqual(
+            pygeoprocessing.get_include(),
+            os.path.join(pygeoprocessing.__path__[0], "extensions"),
+        )
+
+        # Confirm that the include dir exists
+        self.assertTrue(os.path.isdir(pygeoprocessing.get_include()))

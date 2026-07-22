@@ -4,6 +4,7 @@ __init__ module imports all the geoprocessing functions into this namespace.
 """
 import logging
 import types
+import os
 
 try:
     from importlib.metadata import PackageNotFoundError
@@ -83,3 +84,11 @@ VECTOR_TYPE = 2
 
 # Check GDAL's cache max vs SLURM memory if we're on slurm.
 log_warning_if_gdal_will_exhaust_slurm_memory()
+
+
+def get_include():
+    """Return the directory that includes the pygeoprocessing *.h header files.
+
+    Returns:
+        The string path to the header files location."""
+    return os.path.join(os.path.dirname(__file__), 'extensions')
