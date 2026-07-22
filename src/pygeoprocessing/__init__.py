@@ -124,6 +124,13 @@ def __getattr__(name: str):
     raise AttributeError(name)
 
 
+# Our lazy attribute loading means that items we want to lazily load won't
+# be able to be inspected easily with dir().  Add them back.
+def __dir__():
+    _default_attrs = list(globals().keys())
+    return sorted(_default_attrs + list(__all__))
+
+
 def get_include():
     """Return the directory that includes the pygeoprocessing *.h header files.
 
