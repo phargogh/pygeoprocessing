@@ -3,6 +3,11 @@ Release History
 
 Unreleased Changes
 ------------------
+* Added a new function, ``pygeoprocessing.get_include()`` that returns the
+  path to the ``extensions`` folder within your pygeoprocessing install.
+  To make compilation on cross-compiled systems easier, all top-level imports
+  from the ``pygeoprocessing`` namespace are lazily loaded.
+  https://github.com/natcap/pygeoprocessing/issues/480
 * ``warp_raster`` will now automatically assign an appropriate NoData value
   to any input raster without one defined. This fixes a bug where
   ``align_and_resize_raster_stack`` would pad rasters that were smaller
