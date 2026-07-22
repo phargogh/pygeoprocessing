@@ -3,8 +3,11 @@
 __init__ module imports all the geoprocessing functions into this namespace.
 """
 import logging
+import sys
 import types
 import os
+import importlib
+import functools
 
 try:
     from importlib.metadata import PackageNotFoundError
@@ -12,67 +15,6 @@ try:
 except ImportError:
     from importlib_metadata import version
     from importlib_metadata import PackageNotFoundError
-
-from . import geoprocessing
-from .geoprocessing import _assert_is_valid_pixel_size
-from .geoprocessing import align_and_resize_raster_stack
-from .geoprocessing import align_bbox
-from .geoprocessing import array_equals_nodata
-from .geoprocessing import build_overviews
-from .geoprocessing import calculate_disjoint_polygon_set
-from .geoprocessing import choose_dtype
-from .geoprocessing import choose_nodata
-from .geoprocessing import convolve_2d
-from .geoprocessing import create_raster_from_bounding_box
-from .geoprocessing import create_raster_from_vector_extents
-from .geoprocessing import distance_transform_edt
-from .geoprocessing import get_gis_type
-from .geoprocessing import get_raster_info
-from .geoprocessing import get_vector_info
-from .geoprocessing import interpolate_points
-from .geoprocessing import iterblocks
-from .geoprocessing import mask_raster
-from .geoprocessing import merge_bounding_box_list
-from .geoprocessing import new_raster_from_base
-from .geoprocessing import numpy_array_to_raster
-from .geoprocessing import raster_calculator
-from .geoprocessing import raster_map
-from .geoprocessing import raster_reduce
-from .geoprocessing import raster_to_numpy_array
-from .geoprocessing import rasterize
-from .geoprocessing import ReclassificationMissingValuesError
-from .geoprocessing import reclassify_raster
-from .geoprocessing import reproject_vector
-from .geoprocessing import shapely_geometry_to_vector
-from .geoprocessing import stitch_rasters
-from .geoprocessing import transform_bounding_box
-from .geoprocessing import warp_raster
-from .geoprocessing import zonal_statistics
-from .geoprocessing_core import calculate_slope
-from .geoprocessing_core import raster_band_percentile
-from .slurm_utils import log_warning_if_gdal_will_exhaust_slurm_memory
-from .utils import GDALUseExceptions
-from .utils import gdal_use_exceptions
-
-try:
-    __version__ = version('pygeoprocessing')
-except PackageNotFoundError:
-    # package is not installed
-    pass
-
-
-# Programmatically defining __all__ based on what's been imported.
-# Thus, the imports are the source of truth for __all__.
-__all__ = ('calculate_slope', 'raster_band_percentile',
-           'ReclassificationMissingValuesError')
-exclude_set = {'log_warning_if_gdal_will_exhaust_slurm_memory'}
-for attrname in [k for k in locals().keys()]:
-    try:
-        if (isinstance(getattr(geoprocessing, attrname), types.FunctionType)
-                and attrname not in exclude_set):
-            __all__ += (attrname,)
-    except AttributeError:
-        pass
 
 LOGGER = logging.getLogger(__name__)
 LOGGER.addHandler(logging.NullHandler())  # silence logging by default
@@ -82,8 +24,104 @@ UNKNOWN_TYPE = 0
 RASTER_TYPE = 1
 VECTOR_TYPE = 2
 
-# Check GDAL's cache max vs SLURM memory if we're on slurm.
-log_warning_if_gdal_will_exhaust_slurm_memory()
+try:
+    __version__ = version('pygeoprocessing')
+except PackageNotFoundError:
+    # package is not installed
+    pass
+
+
+def _lazy_import(modulename):
+    # Locate the module's specification
+    package = None
+    if modulename.startswith('.'):
+        package = __package__
+    spec = importlib.util.find_spec(modulename, package=package)
+    if spec is None:
+        raise ModuleNotFoundError(f"No module named '{module}'")
+
+    # Wrap the existing loader with LazyLoader
+    loader = importlib.util.LazyLoader(spec.loader)
+    spec.loader = loader
+
+    # Create the module object from the modified spec
+    module = importlib.util.module_from_spec(spec)
+
+    # Cache it in sys.modules so future traditional imports pull this reference
+    sys.modules[modulename] = module
+
+    # Execute the module proxy shell
+    loader.exec_module(module)
+    return module
+
+
+geoprocessing = _lazy_import(".geoprocessing")
+_exposed_attrs = {
+    ".geoprocessing": [
+        "_assert_is_valid_pixel_size",
+        "align_and_resize_raster_stack",
+        "align_bbox",
+        "array_equals_nodata",
+        "build_overviews",
+        "calculate_disjoint_polygon_set",
+        "choose_dtype",
+        "choose_nodata",
+        "convolve_2d",
+        "create_raster_from_bounding_box",
+        "create_raster_from_vector_extents",
+        "distance_transform_edt",
+        "get_gis_type",
+        "get_raster_info",
+        "get_vector_info",
+        "interpolate_points",
+        "iterblocks",
+        "mask_raster",
+        "merge_bounding_box_list",
+        "new_raster_from_base",
+        "numpy_array_to_raster",
+        "raster_calculator",
+        "raster_map",
+        "raster_reduce",
+        "raster_to_numpy_array",
+        "rasterize",
+        "ReclassificationMissingValuesError",
+        "reclassify_raster",
+        "reproject_vector",
+        "shapely_geometry_to_vector",
+        "stitch_rasters",
+        "transform_bounding_box",
+        "warp_raster",
+        "zonal_statistics",
+    ],
+    ".slurm_utils": [
+        "log_warning_if_gdal_will_exhaust_slurm_memory",
+    ],
+    ".utils": [
+         "GDALUseExceptions",
+         "gdal_use_exceptions",
+    ],
+    ".geoprocessing_core": [
+        "calculate_slope",
+        "raster_band_percentile",
+    ],
+}
+_reverse_module_map = {}  # funcname: modulename
+__all__ = tuple()
+for _modulename, _member_funcnames in _exposed_attrs.items():
+    for _funcname in _member_funcnames:
+        _reverse_module_map[_funcname] = _modulename
+        __all__ += (_funcname,)
+
+# Lazily load attributes that are defined in __all__.
+def __getattr__(name: str):
+    if name in __all__:
+        package = None
+        module = _reverse_module_map[name]
+        if module.startswith('.'):
+            package = __package__
+        imported_module = importlib.import_module(module, package=package)
+        return getattr(imported_module, name)
+    raise AttributeError(name)
 
 
 def get_include():
