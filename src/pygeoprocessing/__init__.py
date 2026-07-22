@@ -32,7 +32,20 @@ except PackageNotFoundError:
 
 
 def _lazy_import(modulename):
-    # Locate the module's specification
+    """Lazily import a module.
+
+    The returned modbule object will not actually be imported until a module
+    attribute is accessed.
+
+    Args:
+        modulename (str): The name of the module to load.  If the modulename
+            starts with a ".", it will be treated as a relative import.
+
+    Returns:
+        An ``importlib.util._LazyModule`` instance.
+    """
+    # Locate the module's specification.
+    # Handle the case where a relative import is requested.
     package = None
     if modulename.startswith('.'):
         package = __package__
