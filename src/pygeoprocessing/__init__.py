@@ -34,7 +34,7 @@ except PackageNotFoundError:
 def _lazy_import(modulename):
     """Lazily import a module.
 
-    The returned modbule object will not actually be imported until a module
+    The returned module object will not actually be imported until a module
     attribute is accessed.
 
     Args:
