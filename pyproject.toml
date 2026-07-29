@@ -1,7 +1,7 @@
 [project]
 name = "pygeoprocessing"
 description = "PyGeoprocessing: Geoprocessing routines for GIS"
-requires-python = ">=3.6"
+requires-python = ">=3.9"
 license = "BSD-3-Clause"
 license-files = ["LICENSE.txt"]
 maintainers = [

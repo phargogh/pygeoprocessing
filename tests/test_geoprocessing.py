@@ -144,6 +144,10 @@ class TestGeoprocessing(unittest.TestCase):
         for attrname in pygeoprocessing.__all__:
             try:
                 func = getattr(pygeoprocessing, attrname)
+
+                # __all__ can be a module, e.g. geoprocessing.
+                if isinstance(func, types.ModuleType):
+                    continue
                 try:
                     _ = getattr(func, '__call__')
                 except AttributeError:
