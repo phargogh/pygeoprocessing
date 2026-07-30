@@ -3,14 +3,9 @@
 __init__ module imports all the geoprocessing functions into this namespace.
 """
 import logging
-import sys
-import types
 import os
-import importlib
-import functools
+from importlib.metadata import PackageNotFoundError, version
 
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version
 import lazy_loader
 
 LOGGER = logging.getLogger(__name__)
