@@ -144,6 +144,10 @@ class TestGeoprocessing(unittest.TestCase):
         for attrname in pygeoprocessing.__all__:
             try:
                 func = getattr(pygeoprocessing, attrname)
+
+                # __all__ can be a module, e.g. geoprocessing.
+                if isinstance(func, types.ModuleType):
+                    continue
                 try:
                     _ = getattr(func, '__call__')
                 except AttributeError:
@@ -6102,3 +6106,14 @@ class TestGeoprocessing(unittest.TestCase):
                 [500000, -50, 0, 5000000, 0, 50],
                 [499999, 5000001, 499999, 5000001]),
             [499950, 5000000, 500000, 5000050])
+
+    def test_get_include(self):
+        """PGP: test get_include()."""
+        # Check the value is what we expect
+        self.assertEqual(
+            pygeoprocessing.get_include(),
+            os.path.join(pygeoprocessing.__path__[0], "extensions"),
+        )
+
+        # Confirm that the include dir exists
+        self.assertTrue(os.path.isdir(pygeoprocessing.get_include()))
